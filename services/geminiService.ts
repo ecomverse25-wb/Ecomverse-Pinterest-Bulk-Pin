@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, Type, ChatSession } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { GeneratedTextResponse, PinConfig, LogoPosition } from "../types";
 
 // Helper to poll Replicate status
@@ -11,13 +11,13 @@ const pollReplicate = async (getUrl: string, apiKey: string): Promise<string> =>
                 'Content-Type': 'application/json',
             }
         });
-        
+
         if (!response.ok) {
             throw new Error(`Replicate polling error: ${response.statusText}`);
         }
 
         const data = await response.json();
-        
+
         if (data.status === 'succeeded') {
             return data.output[0] || data.output; // Some models return array, some string
         } else if (data.status === 'failed' || data.status === 'canceled') {
@@ -39,11 +39,11 @@ const generateReplicateImage = async (prompt: string, config: PinConfig, apiKey:
     switch (config.model) {
         case 'flux-schnell':
             // black-forest-labs/flux-schnell
-            modelVersion = "black-forest-labs/flux-schnell"; 
+            modelVersion = "black-forest-labs/flux-schnell";
             inputs.aspect_ratio = config.ratio.replace(':', '_'); // Flux uses 9_16 format usually
-            if(config.ratio === '9:16') inputs.aspect_ratio = '9:16';
-            if(config.ratio === '2:3') inputs.aspect_ratio = '2:3';
-            if(config.ratio === '1:2') inputs.aspect_ratio = '9:16'; // Fallback
+            if (config.ratio === '9:16') inputs.aspect_ratio = '9:16';
+            if (config.ratio === '2:3') inputs.aspect_ratio = '2:3';
+            if (config.ratio === '1:2') inputs.aspect_ratio = '9:16'; // Fallback
             break;
         case 'flux-dev':
             // black-forest-labs/flux-dev (Higher quality than schnell)
@@ -59,7 +59,7 @@ const generateReplicateImage = async (prompt: string, config: PinConfig, apiKey:
             else if (config.ratio === '2:3') { inputs.width = 672; inputs.height = 1008; } // Multiples of 8
             else if (config.ratio === '1:2') { inputs.width = 512; inputs.height = 1024; }
             else { inputs.width = 768; inputs.height = 768; } // Default square
-            
+
             // Ensure guidance scale is low for Turbo (often 0.0 or 1.0) and steps are low (1-4)
             inputs.guidance_scale = 0.0;
             inputs.num_inference_steps = 2;
@@ -68,16 +68,16 @@ const generateReplicateImage = async (prompt: string, config: PinConfig, apiKey:
             // ideogram-ai/ideogram-v2
             modelVersion = "ideogram-ai/ideogram-v2";
             inputs.aspect_ratio = config.ratio;
-            if(config.ratio === '1:2') inputs.aspect_ratio = '9:16'; // Ideogram supports specific set
+            if (config.ratio === '1:2') inputs.aspect_ratio = '9:16'; // Ideogram supports specific set
             break;
         case 'seedream4':
             // Using a high-quality SDXL/Flux base as placeholder for "SeeDream4" style
             modelVersion = "black-forest-labs/flux-dev";
             inputs.aspect_ratio = config.ratio === '9:16' ? '9:16' : '2:3';
-            inputs.prompt = `SeeDream4 Style, ${prompt}`; 
+            inputs.prompt = `SeeDream4 Style, ${prompt}`;
             break;
         default:
-             modelVersion = "black-forest-labs/flux-schnell";
+            modelVersion = "black-forest-labs/flux-schnell";
     }
 
     // Call Replicate API (Predictions)
@@ -105,34 +105,34 @@ const generateReplicateImage = async (prompt: string, config: PinConfig, apiKey:
 
 // Analyze the URL to generate prompts and SEO data (Using Gemini / ChatGPT 5 simulated via prompt engineering)
 export const generatePinDetails = async (
-  url: string, 
-  config: PinConfig, 
-  textRules: string = '', 
-  imageRules: string = '', 
-  interests: string = '',
-  targetKeyword: string = '',
-  googleApiKey: string
+    url: string,
+    config: PinConfig,
+    textRules: string = '',
+    imageRules: string = '',
+    interests: string = '',
+    targetKeyword: string = '',
+    googleApiKey: string
 ): Promise<GeneratedTextResponse> => {
-  if (!googleApiKey) throw new Error("Google API Key is missing. Please check your settings.");
-  
-  const ai = new GoogleGenAI({ apiKey: googleApiKey });
-  
-  try {
-    let styleInstruction = "";
-    switch (config.style) {
-      case 'basic_top': styleInstruction = "The image should have clear space at the TOP for text, or include the title text at the top in a modern font."; break;
-      case 'basic_middle': styleInstruction = "The image should have the title text overlaying the center/middle of the image in a bold, readable font."; break;
-      case 'basic_bottom': styleInstruction = "The image should have clear space at the BOTTOM for text, or include the title text at the bottom."; break;
-      case 'collage': styleInstruction = "The image should appear as a collage of 2-3 related images."; break;
-      case 'custom': styleInstruction = "Follow the brand guidelines for image style."; break;
-    }
+    if (!googleApiKey) throw new Error("Google API Key is missing. Please check your settings.");
 
-    if (config.websiteUrl) {
-      styleInstruction += ` IMPORTANT: You MUST include the website URL "${config.websiteUrl}" as small, readable text at the bottom center of the image.`;
-    }
+    const ai = new GoogleGenAI({ apiKey: googleApiKey });
 
-    const productModeInstruction = config.contentType === 'product'
-        ? `
+    try {
+        let styleInstruction = "";
+        switch (config.style) {
+            case 'basic_top': styleInstruction = "The image should have clear space at the TOP for text, or include the title text at the top in a modern font."; break;
+            case 'basic_middle': styleInstruction = "The image should have the title text overlaying the center/middle of the image in a bold, readable font."; break;
+            case 'basic_bottom': styleInstruction = "The image should have clear space at the BOTTOM for text, or include the title text at the bottom."; break;
+            case 'collage': styleInstruction = "The image should appear as a collage of 2-3 related images."; break;
+            case 'custom': styleInstruction = "Follow the brand guidelines for image style."; break;
+        }
+
+        if (config.websiteUrl) {
+            styleInstruction += ` IMPORTANT: You MUST include the website URL "${config.websiteUrl}" as small, readable text at the bottom center of the image.`;
+        }
+
+        const productModeInstruction = config.contentType === 'product'
+            ? `
         CRITICAL PRODUCT VISUALIZATION INSTRUCTIONS:
         1. IDENTIFY the specific physical product being sold or discussed at the URL.
         2. The 'visualPrompt' MUST describe a photorealistic, high-end product photography shot of this specific item.
@@ -141,17 +141,17 @@ export const generatePinDetails = async (
         5. LIGHTING: Use natural, cinematic lighting (golden hour, dappled light, or soft window light).
         6. Do NOT create generic abstract images. Show the PRODUCT prominently.
         `
-        : '';
+            : '';
 
-    const keywordContext = targetKeyword ? `Target SEO Keyword: "${targetKeyword}"` : 'Identify the most effective SEO Target Keyword for this content.';
-    const promptContext = interests ? `Additional Focus Interests/Keywords: ${interests}` : '';
+        const keywordContext = targetKeyword ? `Target SEO Keyword: "${targetKeyword}"` : 'Identify the most effective SEO Target Keyword for this content.';
+        const promptContext = interests ? `Additional Focus Interests/Keywords: ${interests}` : '';
 
-    // Interpolate placeholders in rules if they exist
-    const processedTextRules = textRules
-        .replace(/\$\{url\}/g, url)
-        .replace(/\$\{interestsNote\}/g, interests ? ` Note on interests: ${interests}` : '');
+        // Interpolate placeholders in rules if they exist
+        const processedTextRules = textRules
+            .replace(/\$\{url\}/g, url)
+            .replace(/\$\{interestsNote\}/g, interests ? ` Note on interests: ${interests}` : '');
 
-    const systemInstruction = `You are an expert Pinterest content strategist using advanced NLP techniques (ChatGPT 5 style) for high-conversion copy.
+        const systemInstruction = `You are an expert Pinterest content strategist using advanced NLP techniques (ChatGPT 5 style) for high-conversion copy.
     
     TEXT PROMPT RULES (Titles/Descriptions):
     ${processedTextRules}
@@ -171,31 +171,31 @@ export const generatePinDetails = async (
     
     If reference images are provided, use them to accurately describe the product's color, shape, and features in the 'visualPrompt', but ALWAYS place it in a new, creative scene as described above.`;
 
-    const contents: any[] = [];
-    
-    // Add Reference Images if available (Multimodal analysis)
-    if (config.referenceImages && config.referenceImages.length > 0) {
-        config.referenceImages.forEach(imgData => {
-            try {
-                // imgData is data:image/jpeg;base64,....
-                const base64Data = imgData.split(',')[1];
-                const mimeMatch = imgData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/);
-                const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-                
-                contents.push({
-                    inlineData: {
-                        mimeType: mimeType,
-                        data: base64Data
-                    }
-                });
-            } catch (e) {
-                console.warn("Failed to parse reference image for Gemini", e);
-            }
-        });
-    }
+        const contents: any[] = [];
 
-    contents.push({
-        text: `Analyze this URL string and predict the content to create a high-converting Pinterest Pin configuration. 
+        // Add Reference Images if available (Multimodal analysis)
+        if (config.referenceImages && config.referenceImages.length > 0) {
+            config.referenceImages.forEach(imgData => {
+                try {
+                    // imgData is data:image/jpeg;base64,....
+                    const base64Data = imgData.split(',')[1];
+                    const mimeMatch = imgData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/);
+                    const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+
+                    contents.push({
+                        inlineData: {
+                            mimeType: mimeType,
+                            data: base64Data
+                        }
+                    });
+                } catch (e) {
+                    console.warn("Failed to parse reference image for Gemini", e);
+                }
+            });
+        }
+
+        contents.push({
+            text: `Analyze this URL string and predict the content to create a high-converting Pinterest Pin configuration. 
       URL: ${url}
       ${promptContext}
       ${keywordContext}
@@ -213,36 +213,36 @@ export const generatePinDetails = async (
       4. A SEO-optimized description following TEXT PROMPT RULES.
       5. 3-5 relevant hashtags.
       `
-    });
+        });
 
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: { parts: contents },
-      config: {
-        systemInstruction: systemInstruction,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            targetKeyword: { type: Type.STRING, description: "The main SEO keyword targeted." },
-            visualPrompt: { type: Type.STRING, description: "Detailed prompt for image generation. Ensure {title} placeholders are replaced with actual text." },
-            title: { type: Type.STRING, description: "Catchy headline for the pin." },
-            description: { type: Type.STRING, description: "Engaging description for the pin." },
-            tags: { type: Type.ARRAY, items: { type: Type.STRING } }
-          },
-          required: ["targetKeyword", "visualPrompt", "title", "description", "tags"]
+        const response = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: { parts: contents },
+            config: {
+                systemInstruction: systemInstruction,
+                responseMimeType: "application/json",
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        targetKeyword: { type: Type.STRING, description: "The main SEO keyword targeted." },
+                        visualPrompt: { type: Type.STRING, description: "Detailed prompt for image generation. Ensure {title} placeholders are replaced with actual text." },
+                        title: { type: Type.STRING, description: "Catchy headline for the pin." },
+                        description: { type: Type.STRING, description: "Engaging description for the pin." },
+                        tags: { type: Type.ARRAY, items: { type: Type.STRING } }
+                    },
+                    required: ["targetKeyword", "visualPrompt", "title", "description", "tags"]
+                }
+            }
+        });
+
+        if (response.text) {
+            return JSON.parse(response.text) as GeneratedTextResponse;
         }
-      }
-    });
-
-    if (response.text) {
-      return JSON.parse(response.text) as GeneratedTextResponse;
+        throw new Error("No response from Gemini");
+    } catch (error) {
+        console.error("Error generating pin details:", error);
+        throw error;
     }
-    throw new Error("No response from Gemini");
-  } catch (error) {
-    console.error("Error generating pin details:", error);
-    throw error;
-  }
 };
 
 // Regenerate ONLY text based on new keywords
@@ -256,7 +256,7 @@ export const regeneratePinText = async (
 ): Promise<GeneratedTextResponse> => {
     if (!googleApiKey) throw new Error("Google API Key is missing. Please check your settings.");
     const ai = new GoogleGenAI({ apiKey: googleApiKey });
-    
+
     // Interpolate placeholders in rules if they exist
     const processedTextRules = textRules
         .replace(/\$\{url\}/g, url)
@@ -295,7 +295,7 @@ export const regeneratePinText = async (
                     type: Type.OBJECT,
                     properties: {
                         targetKeyword: { type: Type.STRING },
-                        visualPrompt: { type: Type.STRING }, 
+                        visualPrompt: { type: Type.STRING },
                         title: { type: Type.STRING },
                         description: { type: Type.STRING },
                         tags: { type: Type.ARRAY, items: { type: Type.STRING } }
@@ -320,7 +320,7 @@ export const regeneratePinText = async (
  * Returns the composited image as a Base64 string.
  */
 const applyOverlays = async (
-    baseImageUrl: string, 
+    baseImageUrl: string,
     config: PinConfig
 ): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -333,8 +333,8 @@ const applyOverlays = async (
 
         const baseImg = new Image();
         // Enable CORS to allow manipulating images from external URLs
-        baseImg.crossOrigin = "anonymous"; 
-        
+        baseImg.crossOrigin = "anonymous";
+
         baseImg.onload = () => {
             canvas.width = baseImg.width;
             canvas.height = baseImg.height;
@@ -351,7 +351,7 @@ const applyOverlays = async (
                 const fontSize = canvas.width * 0.045; // 4.5% of width
                 ctx.font = `bold ${fontSize}px sans-serif`;
                 const metrics = ctx.measureText(text);
-                
+
                 const hPadding = fontSize * 1.5;
                 const vPadding = fontSize * 0.8;
                 const btnWidth = metrics.width + (hPadding * 2);
@@ -378,15 +378,15 @@ const applyOverlays = async (
                     x = (canvas.width - btnWidth) / 2;
                     y = (canvas.height - btnHeight) / 2;
                 } else if (position === 'bottom-center') {
-                     x = (canvas.width - btnWidth) / 2;
-                     y = canvas.height - btnHeight - margin;
+                    x = (canvas.width - btnWidth) / 2;
+                    y = canvas.height - btnHeight - margin;
                 } else if (position === 'top-center') {
                     x = (canvas.width - btnWidth) / 2;
                     y = margin;
                 } else {
-                     // Default Bottom Center
-                     x = (canvas.width - btnWidth) / 2;
-                     y = canvas.height - btnHeight - margin;
+                    // Default Bottom Center
+                    x = (canvas.width - btnWidth) / 2;
+                    y = canvas.height - btnHeight - margin;
                 }
 
                 // Shadow
@@ -398,7 +398,7 @@ const applyOverlays = async (
                 // Button Shape (Pill)
                 ctx.fillStyle = bgColor;
                 ctx.beginPath();
-                const r = btnHeight / 2; 
+                const r = btnHeight / 2;
                 ctx.moveTo(x + r, y);
                 ctx.lineTo(x + btnWidth - r, y);
                 ctx.quadraticCurveTo(x + btnWidth, y, x + btnWidth, y + r);
@@ -430,7 +430,7 @@ const applyOverlays = async (
 
                     const logoWidth = canvas.width * (sizePercent / 100);
                     const logoHeight = logoWidth * (logoImg.height / logoImg.width);
-                    
+
                     const paddingX = canvas.width * 0.05;
                     const paddingY = canvas.height * 0.05;
 
@@ -450,14 +450,14 @@ const applyOverlays = async (
                     } else if (position === 'top-center') {
                         x = (canvas.width - logoWidth) / 2; y = paddingY;
                     } else if (position === 'bottom-center') {
-                         x = (canvas.width - logoWidth) / 2; y = canvas.height - logoHeight - paddingY;
+                        x = (canvas.width - logoWidth) / 2; y = canvas.height - logoHeight - paddingY;
                     }
 
                     // Simple shadow for logo to stand out
                     ctx.shadowColor = 'rgba(0,0,0,0.3)';
                     ctx.shadowBlur = 5;
                     ctx.drawImage(logoImg, x, y, logoWidth, logoHeight);
-                    
+
                     resolve(canvas.toDataURL('image/png'));
                 };
                 logoImg.onerror = (e) => {
@@ -467,13 +467,13 @@ const applyOverlays = async (
                 };
                 logoImg.src = config.logoData;
             } else {
-                 resolve(canvas.toDataURL('image/png'));
+                resolve(canvas.toDataURL('image/png'));
             }
         };
-        
+
         baseImg.onerror = async () => {
-             // Fallback for CORS issues
-             try {
+            // Fallback for CORS issues
+            try {
                 const response = await fetch(baseImageUrl);
                 const blob = await response.blob();
                 const reader = new FileReader();
@@ -482,17 +482,17 @@ const applyOverlays = async (
                     // Retry with local URL
                     const fallbackImg = new Image();
                     fallbackImg.onload = () => {
-                         canvas.width = fallbackImg.width;
-                         canvas.height = fallbackImg.height;
-                         ctx.drawImage(fallbackImg, 0, 0);
-                         resolve(localUrl); 
+                        canvas.width = fallbackImg.width;
+                        canvas.height = fallbackImg.height;
+                        ctx.drawImage(fallbackImg, 0, 0);
+                        resolve(localUrl);
                     };
                     fallbackImg.src = localUrl;
                 }
                 reader.readAsDataURL(blob);
-             } catch(err) {
-                 reject("Failed to load base image (CORS)");
-             }
+            } catch (err) {
+                reject("Failed to load base image (CORS)");
+            }
         };
 
         baseImg.src = baseImageUrl;
@@ -501,135 +501,134 @@ const applyOverlays = async (
 
 // Generate the actual image based on the prompt
 export const generatePinImage = async (prompt: string, config: PinConfig, googleApiKey: string, replicateApiKey?: string): Promise<string> => {
-  let generatedImageUrl = "";
+    let generatedImageUrl = "";
 
-  // Check if using Replicate Models
-  if (['ideogram', 'flux-schnell', 'flux-dev', 'sdxl-turbo', 'seedream4'].includes(config.model)) {
-      if (!replicateApiKey) throw new Error("Please add your Replicate API Token in Settings.");
-      generatedImageUrl = await generateReplicateImage(prompt, config, replicateApiKey);
-  } else {
-      // Google Models
-      if (!googleApiKey) throw new Error("Google API Key is missing. Please check your settings.");
-      const ai = new GoogleGenAI({ apiKey: googleApiKey });
+    // Check if using Replicate Models
+    if (['ideogram', 'flux-schnell', 'flux-dev', 'sdxl-turbo', 'seedream4'].includes(config.model)) {
+        if (!replicateApiKey) throw new Error("Please add your Replicate API Token in Settings.");
+        generatedImageUrl = await generateReplicateImage(prompt, config, replicateApiKey);
+    } else {
+        // Google Models
+        if (!googleApiKey) throw new Error("Google API Key is missing. Please check your settings.");
+        const ai = new GoogleGenAI({ apiKey: googleApiKey });
 
-      try {
-        let targetRatio = "9:16"; 
-        if (config.ratio === '9:16') targetRatio = "9:16";
-        
-        if (config.model === 'gemini-2.5-flash-image' || config.model === 'gemini-3-pro-image-preview') {
-            if (config.ratio === '1:2') targetRatio = '9:16';
-            if (config.ratio === '2:3') targetRatio = '3:4';
-            if (config.ratio === '9:16') targetRatio = '9:16';
+        try {
+            let targetRatio = "9:16";
+            if (config.ratio === '9:16') targetRatio = "9:16";
 
-            const requestConfig: any = {
-                  imageConfig: {
-                    aspectRatio: targetRatio,
-                    numberOfImages: 1,
-                  }
-            };
-            if (config.model === 'gemini-3-pro-image-preview') {
-                 requestConfig.imageConfig.imageSize = config.imageSize || "1K";
-            }
+            if (config.model === 'gemini-2.5-flash-image' || config.model === 'gemini-3-pro-image-preview') {
+                if (config.ratio === '1:2') targetRatio = '9:16';
+                if (config.ratio === '2:3') targetRatio = '3:4';
+                if (config.ratio === '9:16') targetRatio = '9:16';
 
-            const contents: any[] = [];
-            if (config.referenceImages && config.referenceImages.length > 0) {
-                config.referenceImages.forEach(imgData => {
-                    try {
-                        const base64Data = imgData.split(',')[1];
-                        const mimeMatch = imgData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/);
-                        const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-                        contents.push({ inlineData: { mimeType: mimeType, data: base64Data } });
-                    } catch (e) { console.warn("Ref image error", e); }
+                const requestConfig: any = {
+                    imageConfig: {
+                        aspectRatio: targetRatio,
+                        numberOfImages: 1,
+                    }
+                };
+                if (config.model === 'gemini-3-pro-image-preview') {
+                    requestConfig.imageConfig.imageSize = config.imageSize || "1K";
+                }
+
+                const contents: any[] = [];
+                if (config.referenceImages && config.referenceImages.length > 0) {
+                    config.referenceImages.forEach(imgData => {
+                        try {
+                            const base64Data = imgData.split(',')[1];
+                            const mimeMatch = imgData.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/);
+                            const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+                            contents.push({ inlineData: { mimeType: mimeType, data: base64Data } });
+                        } catch (e) { console.warn("Ref image error", e); }
+                    });
+                }
+                contents.push({ text: prompt });
+
+                const response = await ai.models.generateContent({
+                    model: config.model,
+                    contents: { parts: contents },
+                    config: requestConfig
                 });
-            }
-            contents.push({ text: prompt });
 
-            const response = await ai.models.generateContent({
-                model: config.model,
-                contents: { parts: contents },
-                config: requestConfig
-              });
-          
-            let foundImage = false;
-            for (const part of response.candidates?.[0]?.content?.parts || []) {
-                if (part.inlineData) {
-                  generatedImageUrl = `data:image/png;base64,${part.inlineData.data}`;
-                  foundImage = true;
-                  break;
+                let foundImage = false;
+                for (const part of response.candidates?.[0]?.content?.parts || []) {
+                    if (part.inlineData) {
+                        generatedImageUrl = `data:image/png;base64,${part.inlineData.data}`;
+                        foundImage = true;
+                        break;
+                    }
+                }
+                if (!foundImage) throw new Error("No image data received from Gemini");
+
+            } else if (config.model === 'imagen-4.0-generate-001') {
+                const response = await ai.models.generateImages({
+                    model: 'imagen-4.0-generate-001',
+                    prompt: prompt,
+                    config: { numberOfImages: 1, aspectRatio: config.ratio, outputMimeType: 'image/jpeg' },
+                });
+                if (response.generatedImages?.[0]?.image?.imageBytes) {
+                    generatedImageUrl = `data:image/jpeg;base64,${response.generatedImages[0].image.imageBytes}`;
+                } else {
+                    throw new Error("No image data received from Imagen");
                 }
             }
-            if(!foundImage) throw new Error("No image data received from Gemini");
-
-        } else if (config.model === 'imagen-4.0-generate-001') {
-            const response = await ai.models.generateImages({
-                model: 'imagen-4.0-generate-001',
-                prompt: prompt,
-                config: { numberOfImages: 1, aspectRatio: config.ratio, outputMimeType: 'image/jpeg' },
-            });
-            if (response.generatedImages?.[0]?.image?.imageBytes) {
-                generatedImageUrl = `data:image/jpeg;base64,${response.generatedImages[0].image.imageBytes}`;
-            } else {
-                 throw new Error("No image data received from Imagen");
-            }
+        } catch (error) {
+            console.error("Error generating image:", error);
+            throw error;
         }
-      } catch (error) {
-        console.error("Error generating image:", error);
-        throw error;
-      }
-  }
+    }
 
-  // Apply Overlays (Logo and CTA) if configured
-  if ((config.logoData || config.ctaText) && generatedImageUrl) {
-      try {
-          return await applyOverlays(generatedImageUrl, config);
-      } catch (e) {
-          console.warn("Failed to apply overlays:", e);
-          return generatedImageUrl;
-      }
-  }
+    // Apply Overlays (Logo and CTA) if configured
+    if ((config.logoData || config.ctaText) && generatedImageUrl) {
+        try {
+            return await applyOverlays(generatedImageUrl, config);
+        } catch (e) {
+            console.warn("Failed to apply overlays:", e);
+            return generatedImageUrl;
+        }
+    }
 
-  return generatedImageUrl;
+    return generatedImageUrl;
 };
 
 // Edit an existing image using Gemini 2.5 Flash Image (Nano Banana)
 export const editPinImage = async (base64Image: string, prompt: string, googleApiKey: string): Promise<string> => {
-  if (!googleApiKey) throw new Error("Google API Key is missing. Please check your settings.");
-  const ai = new GoogleGenAI({ apiKey: googleApiKey });
-  
-  try {
-      const base64Data = base64Image.split(',')[1];
-      const mimeMatch = base64Image.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/);
-      const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+    if (!googleApiKey) throw new Error("Google API Key is missing. Please check your settings.");
+    const ai = new GoogleGenAI({ apiKey: googleApiKey });
 
-      const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash-image',
-          contents: {
-              parts: [
-                  { inlineData: { mimeType: mimeType, data: base64Data } },
-                  { text: prompt }
-              ]
-          },
-          config: { imageConfig: { aspectRatio: "9:16" } }
-      });
+    try {
+        const base64Data = base64Image.split(',')[1];
+        const mimeMatch = base64Image.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/);
+        const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
 
-      for (const part of response.candidates?.[0]?.content?.parts || []) {
-          if (part.inlineData) {
-              return `data:image/png;base64,${part.inlineData.data}`;
-          }
-      }
-      throw new Error("No image data returned from edit");
-  } catch (error) {
-      console.error("Error editing image:", error);
-      throw error;
-  }
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash-image',
+            contents: {
+                parts: [
+                    { inlineData: { mimeType: mimeType, data: base64Data } },
+                    { text: prompt }
+                ]
+            },
+            config: { imageConfig: { aspectRatio: "9:16" } }
+        });
+
+        for (const part of response.candidates?.[0]?.content?.parts || []) {
+            if (part.inlineData) {
+                return `data:image/png;base64,${part.inlineData.data}`;
+            }
+        }
+        throw new Error("No image data returned from edit");
+    } catch (error) {
+        console.error("Error editing image:", error);
+        throw error;
+    }
 };
 
 // Chat with Gemini Pro 3
-let chatSession: ChatSession;
 
 export const chatWithGemini = async (message: string, history: any[] = [], googleApiKey: string): Promise<string> => {
     if (!googleApiKey) return "Please enter your Google API Key in settings to chat.";
-    
+
     const ai = new GoogleGenAI({ apiKey: googleApiKey });
     const chat = ai.chats.create({
         model: 'gemini-3-pro-preview',
