@@ -6,7 +6,8 @@ import SettingsModal from './components/SettingsModal';
 import LicenseModal from './components/LicenseModal';
 import ChatBot from './components/ChatBot';
 import AdminPanel from './components/AdminPanel';
-import { PinData, PinConfig } from './types';
+import CSVEditor from './components/CSVEditor';
+import { PinData, PinConfig, CSVSettings } from './types';
 import { generatePinDetails, generatePinImage, regeneratePinText, editPinImage } from './services/geminiService';
 
 const App: React.FC = () => {
@@ -14,6 +15,7 @@ const App: React.FC = () => {
   const [globalLoading, setGlobalLoading] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAdminOpen, setIsAdminOpen] = useState(false);
+  const [isCSVEditorOpen, setIsCSVEditorOpen] = useState(false);
   const [isLicensed, setIsLicensed] = useState(false);
 
   // API Keys State - Loaded from localStorage
@@ -100,11 +102,29 @@ CRITICAL TEXT RULES (DO NOT IGNORE):
     };
   });
 
+  // CSV Settings State
+  const [csvSettings, setCsvSettings] = useState<CSVSettings>(() => {
+    const saved = localStorage.getItem('ecomverse_csv_settings');
+    return saved ? JSON.parse(saved) : {
+      imgbbApiKey: '',
+      postInterval: '60',
+      pinsPerDay: 15
+    };
+  });
+
   // Check for License
   useEffect(() => {
     const licensed = localStorage.getItem('ecomverse_license_active') === 'true';
     if (licensed) {
       setIsLicensed(true);
+    }
+  }, []);
+
+  // Check for Admin URL param
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('admin') === 'true') {
+      setIsAdminOpen(true);
     }
   }, []);
 
@@ -114,12 +134,13 @@ CRITICAL TEXT RULES (DO NOT IGNORE):
     setIsLicensed(true);
   };
 
-  const handleSaveSettings = (newTextRules: string, newImageRules: string, newConfig: PinConfig, newReplicateKey: string, newGoogleKey: string) => {
+  const handleSaveSettings = (newTextRules: string, newImageRules: string, newConfig: PinConfig, newReplicateKey: string, newGoogleKey: string, newCsvSettings: CSVSettings) => {
     setTextPromptRules(newTextRules);
     setImagePromptRules(newImageRules);
     setDefaultPinConfig(newConfig);
     setReplicateApiKey(newReplicateKey);
     setGoogleApiKey(newGoogleKey);
+    setCsvSettings(newCsvSettings);
 
     // Save settings to localStorage
     localStorage.setItem('ecomverse_text_rules_v3', newTextRules);
@@ -127,6 +148,7 @@ CRITICAL TEXT RULES (DO NOT IGNORE):
     localStorage.setItem('ecomverse_pin_config', JSON.stringify(newConfig));
     localStorage.setItem('ecomverse_replicate_key', newReplicateKey);
     localStorage.setItem('ecomverse_google_key', newGoogleKey);
+    localStorage.setItem('ecomverse_csv_settings', JSON.stringify(newCsvSettings));
   };
 
   // Step 1: Initialize items from URLs and Analyze content (Generate Prompts & Text)
@@ -433,7 +455,16 @@ CRITICAL TEXT RULES (DO NOT IGNORE):
         defaultConfig={defaultPinConfig}
         replicateApiKey={replicateApiKey}
         googleApiKey={googleApiKey}
+        csvSettings={csvSettings}
         onSave={handleSaveSettings}
+      />
+
+      <CSVEditor
+        isOpen={isCSVEditorOpen}
+        onClose={() => setIsCSVEditorOpen(false)}
+        pins={pins}
+        csvSettings={csvSettings}
+        imgbbApiKey={csvSettings.imgbbApiKey}
       />
 
       <ChatBot googleApiKey={googleApiKey} />
@@ -537,12 +568,23 @@ CRITICAL TEXT RULES (DO NOT IGNORE):
               </button>
 
               <button
-                onClick={handleExportCSV}
-                disabled={pins.length === 0}
-                className={`px-4 py-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-md text-sm font-medium shadow-sm flex items-center gap-2 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors whitespace-nowrap`}
+                onClick={() => setIsCSVEditorOpen(true)}
+                disabled={completedCount === 0}
+                className={`px-4 py-2 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 rounded-md text-sm font-medium shadow-sm flex items-center gap-2 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700 transition-colors whitespace-nowrap
+                            ${completedCount === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                Export CSV
+                View CSV Editor
+              </button>
+
+              <button
+                onClick={handleExportCSV}
+                disabled={pins.length === 0}
+                className={`px-4 py-2 bg-emerald-500 hover:bg-emerald-600 rounded-md text-sm font-medium shadow-sm flex items-center gap-2 text-white transition-colors whitespace-nowrap
+                            ${pins.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                Export CSV for Pinterest
               </button>
             </div>
           </div>

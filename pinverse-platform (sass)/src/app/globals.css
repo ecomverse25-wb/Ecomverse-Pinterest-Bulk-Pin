@@ -1,0 +1,163 @@
+@import "tailwindcss";
+
+/* Dark mode (default) - Primary brand experience */
+:root,
+.dark {
+  --background: #0F172A;
+  --foreground: #E2E8F0;
+  --primary: #FACC15;
+  --primary-hover: #EAB308;
+  --secondary: #1E293B;
+  --accent: #10B981;
+  --accent-hover: #059669;
+  --card: #1E293B;
+  --card-hover: #334155;
+  --border: #334155;
+  --muted: #64748B;
+  --sidebar: #0F172A;
+  --header: rgba(15, 23, 42, 0.9);
+}
+
+/* Light mode - Warm, branded feel */
+.light {
+  --background: #FDF9F3;
+  --foreground: #1E293B;
+  --primary: #FACC15;
+  --primary-hover: #EAB308;
+  --secondary: #FFF8E7;
+  --accent: #10B981;
+  --accent-hover: #059669;
+  --card: #FFFFFF;
+  --card-hover: #FFFBF0;
+  --border: #FACC15;
+  --muted: #64748B;
+  --sidebar: #1E293B;
+  --header: rgba(253, 249, 243, 0.95);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-inter);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', Arial, Helvetica, sans-serif;
+  transition: background-color 0.3s, color 0.3s;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+/* Gradient text utility */
+.gradient-text {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(30, 41, 59, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(250, 204, 21, 0.1);
+}
+
+.light .glass {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(250, 204, 21, 0.2);
+}
+
+/* Card with shadow for light mode */
+.card-themed {
+  background: var(--card);
+  border: 1px solid var(--border);
+  transition: all 0.2s;
+}
+
+.light .card-themed {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+/* Input styling */
+.input-themed {
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+}
+
+.input-themed::placeholder {
+  color: var(--muted);
+}
+
+.input-themed:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.2);
+}
+
+/* Button styles */
+.btn-primary {
+  background: var(--primary);
+  color: #0F172A;
+  font-weight: 700;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  transition: all 0.2s;
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: var(--secondary);
+  color: var(--foreground);
+  font-weight: 600;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+  background: var(--card-hover);
+  border-color: var(--primary);
+}
+
+.btn-accent {
+  background: var(--accent);
+  color: white;
+  font-weight: 700;
+  padding: 0.75rem 1.5rem;
+  border-radius: 0.5rem;
+  transition: all 0.2s;
+}
+
+.btn-accent:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}

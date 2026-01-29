@@ -100,7 +100,7 @@ const LicenseModal: React.FC<LicenseModalProps> = ({ onActivate, onOpenAdmin }) 
 
         } catch (err) {
             console.error("License check failed", err);
-            setError('Could not connect to license server. If you have a Master Key, ensure it is entered correctly (WAL7BXDX).');
+            setError('Could not connect to license server. Please try again or contact support.');
         } finally {
             if (cleanedKey !== 'WAL7BXDX') {
                 setLoading(false);
@@ -110,7 +110,7 @@ const LicenseModal: React.FC<LicenseModalProps> = ({ onActivate, onOpenAdmin }) 
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-gray-50/90 backdrop-blur-sm overflow-y-auto">
-            <div className="bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md p-8 text-center border border-slate-700 my-8">
+            <div className="relative bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md p-8 text-center border border-slate-700 my-8">
 
                 {/* Ecomverse Logo */}
                 <div className="mb-6 flex flex-col items-center justify-center">
@@ -123,6 +123,10 @@ const LicenseModal: React.FC<LicenseModalProps> = ({ onActivate, onOpenAdmin }) 
                         <span className="text-white">ECOM</span>
                         <span className="text-yellow-400">VERSE</span>
                     </div>
+
+                    {/* Admin Panel Link - Central High Visibility */}
+
+
                 </div>
 
                 <h1 className="text-lg font-bold text-white mb-2">Activate Application</h1>
@@ -173,16 +177,7 @@ const LicenseModal: React.FC<LicenseModalProps> = ({ onActivate, onOpenAdmin }) 
                     {error && <p className="text-xs text-red-400 font-medium text-center p-2 bg-red-900/20 rounded border border-red-900/50">{error}</p>}
                 </div>
 
-                {/* Admin Link */}
-                <div className="mb-4 text-right">
-                    <button
-                        type="button"
-                        onClick={onOpenAdmin}
-                        className="text-xs text-slate-500 hover:text-slate-300 underline transition-colors"
-                    >
-                        Admin Panel
-                    </button>
-                </div>
+
 
                 <button
                     onClick={handleActivate}
@@ -196,9 +191,7 @@ const LicenseModal: React.FC<LicenseModalProps> = ({ onActivate, onOpenAdmin }) 
                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
                     ) : (
-                        <>
-                            Activate
-                        </>
+                        'Activate'
                     )}
                 </button>
             </div>
