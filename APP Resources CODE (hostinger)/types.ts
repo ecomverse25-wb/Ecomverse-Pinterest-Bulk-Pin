@@ -2,9 +2,9 @@
 export type PinStyle = 'basic_top' | 'basic_middle' | 'basic_bottom' | 'collage' | 'custom';
 export type AspectRatio = '9:16' | '2:3' | '1:2';
 export type ContentType = 'article' | 'product';
-export type ImageModel = 
-  | 'gemini-2.5-flash-image' 
-  | 'imagen-4.0-generate-001' 
+export type ImageModel =
+  | 'gemini-2.5-flash-image'
+  | 'imagen-4.0-generate-001'
   | 'gemini-3-pro-image-preview'
   | 'ideogram'
   | 'flux-schnell'
@@ -13,9 +13,9 @@ export type ImageModel =
   | 'seedream4';
 
 export type ImageSize = '1K' | '2K' | '4K';
-export type LogoPosition = 
-  | 'top-left' | 'top-center' | 'top-right' 
-  | 'center' 
+export type LogoPosition =
+  | 'top-left' | 'top-center' | 'top-right'
+  | 'center'
   | 'bottom-left' | 'bottom-center' | 'bottom-right';
 
 export interface PinConfig {
@@ -26,7 +26,7 @@ export interface PinConfig {
   websiteUrl?: string;
   referenceImages?: string[]; // Array of Base64 strings for multiple reference images
   imageSize?: ImageSize;
-  
+
   // Logo Settings
   logoData?: string; // Base64 string of the uploaded logo
   logoPosition?: LogoPosition;
@@ -66,4 +66,25 @@ export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   isLoading?: boolean;
+}
+
+// CSV Editor Types
+export type PostInterval = '30' | '60' | '120' | '180';
+
+export interface CSVPinData {
+  id: string;
+  title: string;
+  description: string;
+  mediaUrl: string;
+  link: string;
+  pinterestBoard: string;
+  publishDate: string;
+  thumbnail: string;
+  keywords: string;
+}
+
+export interface CSVSettings {
+  imgbbApiKey: string;
+  postInterval: PostInterval;
+  pinsPerDay: number;
 }

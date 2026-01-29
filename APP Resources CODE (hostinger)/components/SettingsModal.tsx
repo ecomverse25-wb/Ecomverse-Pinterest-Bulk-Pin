@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { PinConfig, PinStyle, AspectRatio, ImageModel } from '../types';
+import { PinConfig, PinStyle, AspectRatio, ImageModel, PostInterval, CSVSettings } from '../types';
 
 interface SettingsModalProps {
     isOpen: boolean;
@@ -10,10 +10,11 @@ interface SettingsModalProps {
     defaultConfig: PinConfig;
     replicateApiKey: string;
     googleApiKey: string;
-    onSave: (rules: string, imageRules: string, config: PinConfig, replicateKey: string, googleKey: string) => void;
+    csvSettings: CSVSettings;
+    onSave: (rules: string, imageRules: string, config: PinConfig, replicateKey: string, googleKey: string, csvSettings: CSVSettings) => void;
 }
 
-const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, customRules, imageRules, defaultConfig, replicateApiKey, googleApiKey, onSave }) => {
+const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, customRules, imageRules, defaultConfig, replicateApiKey, googleApiKey, csvSettings, onSave }) => {
     const [localTextRules, setLocalTextRules] = useState(customRules);
     const [localImageRules, setLocalImageRules] = useState(imageRules);
     const [localReplicateKey, setLocalReplicateKey] = useState(replicateApiKey);
@@ -23,6 +24,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, customRu
     const [localStyle, setLocalStyle] = useState<PinStyle>(defaultConfig.style);
     const [localRatio, setLocalRatio] = useState<AspectRatio>(defaultConfig.ratio);
     const [localModel, setLocalModel] = useState<ImageModel>(defaultConfig.model);
+
+    // CSV Settings State
+    const [localImgbbKey, setLocalImgbbKey] = useState(csvSettings.imgbbApiKey);
+    const [localPostInterval, setLocalPostInterval] = useState<PostInterval>(csvSettings.postInterval);
+    const [localPinsPerDay, setLocalPinsPerDay] = useState(csvSettings.pinsPerDay);
 
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
 
@@ -36,9 +42,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, customRu
             setLocalStyle(defaultConfig.style);
             setLocalRatio(defaultConfig.ratio);
             setLocalModel(defaultConfig.model);
+            setLocalImgbbKey(csvSettings.imgbbApiKey);
+            setLocalPostInterval(csvSettings.postInterval);
+            setLocalPinsPerDay(csvSettings.pinsPerDay);
             setSaveStatus('idle');
         }
-    }, [isOpen, customRules, imageRules, defaultConfig, replicateApiKey, googleApiKey]);
+    }, [isOpen, customRules, imageRules, defaultConfig, replicateApiKey, googleApiKey, csvSettings]);
 
     if (!isOpen) return null;
 
@@ -52,7 +61,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, customRu
                 ratio: localRatio,
                 model: localModel,
                 contentType: 'article'
-            }, localReplicateKey, localGoogleKey);
+            }, localReplicateKey, localGoogleKey, {
+                imgbbApiKey: localImgbbKey,
+                postInterval: localPostInterval,
+                pinsPerDay: localPinsPerDay
+            });
 
             setSaveStatus('saved');
 
@@ -213,6 +226,78 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, customRu
                                 className="w-full h-32 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-600 rounded p-3 text-xs font-mono text-gray-700 dark:text-slate-200 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none resize-none"
                                 placeholder="e.g. Ensure all images have high contrast. Avoid using cartoon styles..."
                             />
+                        </div>
+                    </div>
+
+                    {/* Section 4: CSV & Scheduling Options */}
+                    <div>
+                        <h3 className="text-sm font-bold text-gray-800 dark:text-gray-200 mb-2 flex items-center gap-2">
+                            <svg className="w-4 h-4 text-pink-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            CSV & Scheduling Options
+                        </h3>
+                        <div className="bg-pink-50 dark:bg-pink-900/10 border border-pink-100 dark:border-pink-900/30 rounded-lg p-4 space-y-4">
+
+                            {/* ImgBB API Key */}
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">ImgBB API Key (Optional)</label>
+                                <input
+                                    type="password"
+                                    value={localImgbbKey}
+                                    onChange={(e) => setLocalImgbbKey(e.target.value)}
+                                    placeholder="b80aeb48f4248d948ba2be1605046d6c"
+                                    className="w-full bg-white dark:bg-slate-700 border border-pink-200 dark:border-pink-800/50 rounded p-2 text-xs text-gray-700 dark:text-white focus:ring-1 focus:ring-pink-500 outline-none"
+                                />
+                                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">
+                                    <strong>Enable Image Hosting:</strong> Add your ImgBB API Key to automatically upload generated images and include direct URLs in your CSV export.
+                                </p>
+                                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                                    Get a free API Key: <a href="https://api.imgbb.com/" target="_blank" rel="noopener noreferrer" className="text-pink-600 dark:text-pink-400 underline hover:text-pink-700">Get ImgBB API Key (100% free, no limits!)</a>
+                                </p>
+                                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1">
+                                    <strong>Benefit:</strong> Images hosted on ImgBB CDN forever, perfect for bulk Pinterest uploading!
+                                </p>
+                            </div>
+
+                            {/* Post Interval */}
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Post Interval (minutes)</label>
+                                <select
+                                    value={localPostInterval}
+                                    onChange={(e) => setLocalPostInterval(e.target.value as PostInterval)}
+                                    className="w-full bg-white dark:bg-slate-700 border border-pink-200 dark:border-pink-800/50 rounded p-2 text-xs text-gray-700 dark:text-white focus:ring-1 focus:ring-pink-500 outline-none"
+                                >
+                                    <option value="30">Every 30 minutes</option>
+                                    <option value="60">Every 1 hour</option>
+                                    <option value="120">Every 2 hours</option>
+                                    <option value="180">Every 3 hours</option>
+                                </select>
+                                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">
+                                    Set how often pins should be scheduled when using auto-increment in CSV editor.
+                                </p>
+                                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                                    <strong>Example:</strong> 30 minutes = 08:00, 08:30, 09:00, 09:30...
+                                </p>
+                            </div>
+
+                            {/* Pins Per Day */}
+                            <div>
+                                <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Pins Per Day</label>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="50"
+                                    value={localPinsPerDay}
+                                    onChange={(e) => setLocalPinsPerDay(Math.max(1, Math.min(50, parseInt(e.target.value) || 15)))}
+                                    className="w-full bg-white dark:bg-slate-700 border border-pink-200 dark:border-pink-800/50 rounded p-2 text-xs text-gray-700 dark:text-white focus:ring-1 focus:ring-pink-500 outline-none"
+                                />
+                                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1">
+                                    Maximum number of pins to schedule per day in CSV editor.
+                                </p>
+                                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                                    <strong>Example:</strong> Set to 15 = only 15 time slots per day, then moves to next day. This helps you schedule consistently without overwhelming your Pinterest account.
+                                </p>
+                            </div>
+
                         </div>
                     </div>
                 </div>
