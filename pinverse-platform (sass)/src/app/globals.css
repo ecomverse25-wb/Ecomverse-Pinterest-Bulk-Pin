@@ -1,8 +1,28 @@
 @import "tailwindcss";
 
-/* Dark mode (default) - Primary brand experience */
-:root,
-.dark {
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-secondary: var(--secondary);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-card: var(--card);
+  --color-card-hover: var(--card-hover);
+  --color-sidebar: var(--sidebar);
+
+  --font-sans: var(--font-inter);
+}
+
+/* Global styles */
+* {
+  border-color: theme(colors.border);
+}
+
+:root {
   --background: #0F172A;
   --foreground: #E2E8F0;
   --primary: #FACC15;
@@ -18,7 +38,6 @@
   --header: rgba(15, 23, 42, 0.9);
 }
 
-/* Light mode - Warm, branded feel */
 .light {
   --background: #FDF9F3;
   --foreground: #1E293B;
@@ -33,12 +52,6 @@
   --muted: #64748B;
   --sidebar: #1E293B;
   --header: rgba(253, 249, 243, 0.95);
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-inter);
 }
 
 body {

@@ -2,15 +2,18 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { Toaster } from "@/components/ui/toaster";
+import React from "react";
 
 const inter = Inter({
   variable: "--font-inter",
   subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "PinVerse - Pinterest Marketing Tools for Creators",
-  description: "Powerful Pinterest marketing automation tools. Create bulk pins, schedule content, and grow your Pinterest traffic with AI-powered tools.",
+  title: "PinVerse Platform",
+  description: "Advanced Pinterest Operations",
   keywords: "Pinterest, marketing, bulk pins, automation, Pinterest tools, content creator, Pinterest scheduler",
   authors: [{ name: "Ecomverse LLC" }],
   openGraph: {
@@ -37,6 +40,7 @@ export default function RootLayout({
       <body className={`${inter.variable} antialiased`}>
         <ThemeProvider>
           {children}
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>

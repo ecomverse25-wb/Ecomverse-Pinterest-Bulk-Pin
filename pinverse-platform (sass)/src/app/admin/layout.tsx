@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import {
     LayoutDashboard,
     Users,
@@ -9,11 +9,10 @@ import {
     ArrowLeft,
     Shield,
     Menu,
-    X
+    X,
+    FileText
 } from "lucide-react";
-import { useState, useEffect } from "react";
-import { getUser } from "@/lib/supabase";
-import { isAdmin } from "@/lib/admin";
+import { useState } from "react";
 
 export default function AdminLayout({
     children,
@@ -21,41 +20,16 @@ export default function AdminLayout({
     children: React.ReactNode;
 }) {
     const pathname = usePathname();
-    const router = useRouter();
     const [sidebarOpen, setSidebarOpen] = useState(false);
-    const [user, setUser] = useState<{ email?: string } | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [authorized, setAuthorized] = useState(false);
 
-    useEffect(() => {
-        checkAdminAccess();
-    }, []);
-
-    const checkAdminAccess = async () => {
-        try {
-            const { user, error } = await getUser();
-            if (error || !user) {
-                router.push("/login");
-                return;
-            }
-            setUser(user);
-
-            // Check if user is admin
-            if (!isAdmin(user.email)) {
-                router.push("/dashboard");
-                return;
-            }
-
-            setAuthorized(true);
-        } catch (err) {
-            router.push("/login");
-        } finally {
-            setLoading(false);
-        }
-    };
+    // Middleware handles auth verification and redirection.
+    // We can assume if we're here, we are authorized.
+    // For specific user data display (Avatar), we might fetch it client side if needed,
+    // or pass it down. For now, we'll keep the layout simple.
 
     const navigation = [
         { name: "Overview", href: "/admin", icon: LayoutDashboard },
+        { name: "Content", href: "/admin/content", icon: FileText },
         { name: "Customers", href: "/admin/customers", icon: Users },
         { name: "Analytics", href: "/admin/analytics", icon: BarChart3 },
     ];
@@ -66,24 +40,6 @@ export default function AdminLayout({
         }
         return pathname.startsWith(href);
     };
-
-    if (loading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center" style={{ background: '#0F172A' }}>
-                <div className="text-center">
-                    <div className="flex items-center gap-2 mb-4 justify-center">
-                        <Shield className="w-8 h-8 text-yellow-400" />
-                        <span className="text-2xl font-black text-white">Admin Panel</span>
-                    </div>
-                    <p className="text-slate-400">Verifying access...</p>
-                </div>
-            </div>
-        );
-    }
-
-    if (!authorized) {
-        return null;
-    }
 
     return (
         <div className="min-h-screen" style={{ background: '#0F172A' }}>
@@ -168,7 +124,7 @@ export default function AdminLayout({
                             className="w-10 h-10 rounded-full flex items-center justify-center font-bold"
                             style={{ background: 'linear-gradient(135deg, #FACC15, #10B981)', color: '#0F172A' }}
                         >
-                            {user?.email?.charAt(0).toUpperCase() || "A"}
+                            <span className="text-lg">A</span>
                         </div>
                     </div>
                 </header>

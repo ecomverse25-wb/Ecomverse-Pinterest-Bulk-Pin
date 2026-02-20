@@ -2,27 +2,31 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowLeft, Mail, MessageSquare, Send, CheckCircle } from "lucide-react";
+import { ArrowLeft, Mail, MessageSquare, Send, CheckCircle, AlertCircle } from "lucide-react";
+import { sendContactEmail } from "./actions";
 
 export default function ContactPage() {
-    const [name, setName] = useState("");
-    const [email, setEmail] = useState("");
-    const [subject, setSubject] = useState("");
-    const [message, setMessage] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [isSubmitted, setIsSubmitted] = useState(false);
+    const [error, setError] = useState("");
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
         setIsLoading(true);
+        setError("");
 
-        // TODO: Implement form submission
+        const formData = new FormData(e.currentTarget);
+
         try {
-            console.log("Contact form:", { name, email, subject, message });
-            // Simulate success
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            setIsSubmitted(true);
+            const result = await sendContactEmail(formData);
+
+            if (result.success) {
+                setIsSubmitted(true);
+            } else {
+                setError(result.error || "Something went wrong.");
+            }
         } catch (err) {
+            setError("An unexpected error occurred.");
             console.error(err);
         } finally {
             setIsLoading(false);
@@ -96,15 +100,27 @@ export default function ContactPage() {
                                 </div>
                                 <h2 className="text-2xl font-bold text-white mb-2">Message Sent!</h2>
                                 <p className="text-slate-400">Thank you for contacting us. We&apos;ll get back to you soon.</p>
+                                <button
+                                    onClick={() => setIsSubmitted(false)}
+                                    className="mt-6 text-sm text-yellow-400 hover:text-yellow-300 underline"
+                                >
+                                    Send another message
+                                </button>
                             </div>
                         ) : (
                             <form onSubmit={handleSubmit} className="space-y-5">
+                                {error && (
+                                    <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-center gap-2 text-red-400 text-sm">
+                                        <AlertCircle className="w-4 h-4" />
+                                        {error}
+                                    </div>
+                                )}
+
                                 <div>
                                     <label className="block text-sm font-medium text-slate-300 mb-2">Your Name</label>
                                     <input
                                         type="text"
-                                        value={name}
-                                        onChange={(e) => setName(e.target.value)}
+                                        name="name"
                                         required
                                         placeholder="John Doe"
                                         className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 outline-none transition"
@@ -115,8 +131,7 @@ export default function ContactPage() {
                                     <label className="block text-sm font-medium text-slate-300 mb-2">Email</label>
                                     <input
                                         type="email"
-                                        value={email}
-                                        onChange={(e) => setEmail(e.target.value)}
+                                        name="email"
                                         required
                                         placeholder="you@example.com"
                                         className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 outline-none transition"
@@ -126,25 +141,24 @@ export default function ContactPage() {
                                 <div>
                                     <label className="block text-sm font-medium text-slate-300 mb-2">Subject</label>
                                     <select
-                                        value={subject}
-                                        onChange={(e) => setSubject(e.target.value)}
+                                        name="subject"
                                         required
+                                        defaultValue=""
                                         className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 outline-none transition"
                                     >
-                                        <option value="">Select a topic</option>
-                                        <option value="general">General Inquiry</option>
-                                        <option value="support">Technical Support</option>
-                                        <option value="billing">Billing Question</option>
-                                        <option value="feature">Feature Request</option>
-                                        <option value="partnership">Partnership</option>
+                                        <option value="" disabled>Select a topic</option>
+                                        <option value="General Inquiry">General Inquiry</option>
+                                        <option value="Technical Support">Technical Support</option>
+                                        <option value="Billing Question">Billing Question</option>
+                                        <option value="Feature Request">Feature Request</option>
+                                        <option value="Partnership">Partnership</option>
                                     </select>
                                 </div>
 
                                 <div>
                                     <label className="block text-sm font-medium text-slate-300 mb-2">Message</label>
                                     <textarea
-                                        value={message}
-                                        onChange={(e) => setMessage(e.target.value)}
+                                        name="message"
                                         required
                                         rows={5}
                                         placeholder="How can we help you?"

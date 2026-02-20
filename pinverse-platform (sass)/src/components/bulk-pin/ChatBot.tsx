@@ -2,7 +2,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { chatWithGemini } from '@/lib/geminiService';
 import { ChatMessage } from '@/lib/types';
-import { MessageSquare, X, Send, Bot, User } from 'lucide-react';
+import { MessageSquare, X, Send, Bot } from 'lucide-react';
+
 
 interface ChatBotProps {
     googleApiKey: string;
@@ -44,9 +45,10 @@ const ChatBot: React.FC<ChatBotProps> = ({ googleApiKey }) => {
         try {
             const responseText = await chatWithGemini(userMsg.text, messages, googleApiKey);
             setMessages(prev => [...prev, { role: 'model', text: responseText }]);
-        } catch (error) {
+        } catch {
             setMessages(prev => [...prev, { role: 'model', text: "Sorry, I encountered an error. Please check your API key and try again." }]);
         } finally {
+
             setIsLoading(false);
         }
     };
@@ -75,8 +77,8 @@ const ChatBot: React.FC<ChatBotProps> = ({ googleApiKey }) => {
                         {messages.map((msg, idx) => (
                             <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                                 <div className={`max-w-[85%] rounded-2xl px-4 py-2 text-sm ${msg.role === 'user'
-                                        ? 'bg-indigo-600 text-white rounded-br-none'
-                                        : 'bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-200 rounded-bl-none shadow-sm'
+                                    ? 'bg-indigo-600 text-white rounded-br-none'
+                                    : 'bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-gray-700 dark:text-gray-200 rounded-bl-none shadow-sm'
                                     }`}>
                                     {msg.text}
                                 </div>

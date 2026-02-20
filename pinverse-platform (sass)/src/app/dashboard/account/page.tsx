@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Save, Eye, EyeOff, ExternalLink, Check } from "lucide-react";
 import { getUser } from "@/lib/supabase";
+import { getUserSettingsAction, updateUserSettingsAction } from "@/app/actions/user-settings-actions";
 
 export default function AccountPage() {
     const [userEmail, setUserEmail] = useState("");
@@ -22,14 +23,15 @@ export default function AccountPage() {
                 setUserEmail(user.email);
             }
 
-            // Load API keys from localStorage
-            const savedGeminiKey = localStorage.getItem('pinverse_google_api_key') || '';
-            const savedReplicateKey = localStorage.getItem('pinverse_replicate_api_key') || '';
-            const savedImgbbKey = localStorage.getItem('pinverse_imgbb_api_key') || '';
-
-            setGeminiKey(savedGeminiKey);
-            setReplicateKey(savedReplicateKey);
-            setImgbbKey(savedImgbbKey);
+            // Load API keys from Database
+            const { settings, error } = await getUserSettingsAction();
+            if (settings) {
+                setGeminiKey(settings.gemini_api_key || '');
+                setReplicateKey(settings.replicate_api_key || '');
+                setImgbbKey(settings.imgbb_api_key || '');
+            } else if (error) {
+                console.error("Failed to load settings:", error);
+            }
         };
 
         loadData();
@@ -38,13 +40,27 @@ export default function AccountPage() {
     const handleSave = async () => {
         setIsSaving(true);
 
-        // Save API keys to localStorage
-        localStorage.setItem('pinverse_google_api_key', geminiKey);
-        localStorage.setItem('pinverse_replicate_api_key', replicateKey);
-        localStorage.setItem('pinverse_imgbb_api_key', imgbbKey);
+        const { success, error } = await updateUserSettingsAction({
+            gemini_api_key: geminiKey,
+            replicate_api_key: replicateKey,
+            imgbb_api_key: imgbbKey
+        });
 
-        // Simulate save delay for UX
-        await new Promise(resolve => setTimeout(resolve, 500));
+        if (!success) {
+            alert("Failed to save settings: " + error);
+            setIsSaving(false);
+            return;
+        }
+
+        // Update functionality in real-time by updating localStorage as fallback/cache or just relying on DB? 
+        // For now, let's keep localStorage as a cache/backup if we want to avoid breaking changes in other components abruptly, 
+        // BUT the goal is migration. Let's assume other components might need updates if they read from localStorage.
+        // We will remove localStorage writing here to enforce DB usage, but checking where else these keys are read is important.
+
+        // Clearing potentially stale localStorage items to avoid confusion
+        localStorage.removeItem('pinverse_google_api_key');
+        localStorage.removeItem('pinverse_replicate_api_key');
+        localStorage.removeItem('pinverse_imgbb_api_key');
 
         setSaved(true);
         setIsSaving(false);

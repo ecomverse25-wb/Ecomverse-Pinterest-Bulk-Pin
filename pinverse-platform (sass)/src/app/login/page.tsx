@@ -27,7 +27,7 @@ export default function LoginPage() {
                 return;
             }
 
-            if (data.session) {
+            if (data?.session) {
                 router.push("/dashboard");
             }
         } catch (err) {

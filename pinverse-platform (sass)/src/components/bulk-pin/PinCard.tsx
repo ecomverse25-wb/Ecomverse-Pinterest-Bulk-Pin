@@ -2,7 +2,9 @@
 
 import React, { useState } from 'react';
 import { PinData } from '@/lib/types';
-import { Copy, Check, RefreshCw, Download, Eye, Edit3, X, Loader2 } from 'lucide-react';
+import { Copy, Check, RefreshCw, Download, Eye, X, Loader2 } from 'lucide-react';
+import Image from 'next/image';
+
 
 interface PinCardProps {
     pin: PinData;
@@ -141,7 +143,14 @@ export default function PinCard({ pin, onUpdate, onGenerateImage, onRegenerateTe
                 <div className="flex flex-col h-full">
                     {/* Image Preview */}
                     <div className="relative w-full aspect-[9/16] bg-slate-900 group shrink-0 max-h-[280px] overflow-hidden">
-                        <img src={pin.imageUrl} alt={pin.title} className={`w-full h-full object-cover ${isProcessingEdit ? 'opacity-50' : ''}`} />
+                        <Image
+                            src={pin.imageUrl || ''}
+                            alt={pin.title || 'Pin Image'}
+                            fill
+                            className={`object-cover ${isProcessingEdit ? 'opacity-50' : ''}`}
+                            unoptimized
+                        />
+
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-2">
                             <button onClick={handleViewFullSize} className="bg-white/90 p-2 rounded-full hover:bg-white text-slate-800" title="View Full Size">
                                 <Eye className="w-5 h-5" />

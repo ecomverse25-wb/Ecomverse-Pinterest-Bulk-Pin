@@ -16,12 +16,17 @@ import {
     Loader2,
     RefreshCw
 } from "lucide-react";
-import { fetchAdminMetrics, AdminMetrics, MetricsChanges, fetchRecentActivities, Activity, formatRelativeTime } from "@/lib/adminData";
+import { fetchAdminMetricsAction, fetchRecentActivitiesAction } from "@/app/actions/admin-actions";
+import { AdminMetrics, MetricsChanges, Activity } from "@/app/admin/types";
+import { formatRelativeTime } from "@/app/admin/utils";
+import ToolVisibilityManager from "@/components/admin/ToolVisibilityManager";
+import { getTools, Tool } from "@/app/actions/tool-actions";
 
 export default function AdminDashboard() {
     const [metrics, setMetrics] = useState<AdminMetrics | null>(null);
     const [changes, setChanges] = useState<MetricsChanges | null>(null);
     const [activities, setActivities] = useState<Activity[]>([]);
+    const [tools, setTools] = useState<Tool[]>([]);
     const [loading, setLoading] = useState(true);
     const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
     const [refreshing, setRefreshing] = useState(false);
@@ -31,12 +36,21 @@ export default function AdminDashboard() {
         else setLoading(true);
 
         const [metricsResult, activitiesResult] = await Promise.all([
-            fetchAdminMetrics(),
-            fetchRecentActivities(5)
+            fetchAdminMetricsAction(),
+            fetchRecentActivitiesAction(5)
         ]);
-        setMetrics(metricsResult.metrics);
-        setChanges(metricsResult.changes);
-        setActivities(activitiesResult.activities);
+        if (metricsResult.metrics) {
+            setMetrics(metricsResult.metrics);
+            setChanges(metricsResult.changes);
+        }
+        if (activitiesResult.activities) {
+            setActivities(activitiesResult.activities);
+        }
+
+        // Fetch tools for visibility manager
+        const toolsResult = await getTools();
+        setTools(toolsResult);
+
         setLastUpdated(new Date());
 
         if (showRefreshing) setRefreshing(false);
@@ -313,6 +327,11 @@ export default function AdminDashboard() {
                         </div>
                     </div>
                 </div>
+            </div>
+
+            {/* Tool Visibility Manager */}
+            <div className="mt-8">
+                <ToolVisibilityManager initialTools={tools} />
             </div>
         </div>
     );

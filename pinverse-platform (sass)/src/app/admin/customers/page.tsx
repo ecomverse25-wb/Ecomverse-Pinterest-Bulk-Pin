@@ -16,9 +16,12 @@ import {
     XCircle,
     AlertCircle,
     Download,
-    Loader2
+    Loader2,
+    Plus
 } from "lucide-react";
-import { fetchAllUsers, updateUserStatus, UserProfile } from "@/lib/adminData";
+import { fetchAllUsersAction, updateUserStatusAction } from "@/app/actions/admin-actions";
+import { UserProfile } from "@/app/admin/types";
+import AddCustomerModal from "./AddCustomerModal";
 
 export default function CustomersPage() {
     const [users, setUsers] = useState<UserProfile[]>([]);
@@ -29,6 +32,7 @@ export default function CustomersPage() {
     const [filterStatus, setFilterStatus] = useState<string>("all");
     const [currentPage, setCurrentPage] = useState(1);
     const [openMenu, setOpenMenu] = useState<string | null>(null);
+    const [showAddCustomer, setShowAddCustomer] = useState(false);
     const itemsPerPage = 10;
 
     // Fetch users on mount
@@ -38,7 +42,7 @@ export default function CustomersPage() {
 
     const loadUsers = async () => {
         setLoading(true);
-        const { users: fetchedUsers, error: fetchError } = await fetchAllUsers();
+        const { users: fetchedUsers, error: fetchError } = await fetchAllUsersAction();
         if (fetchError) {
             setError(fetchError);
         } else {
@@ -50,7 +54,7 @@ export default function CustomersPage() {
     // Handle status toggle
     const handleStatusToggle = async (userId: string, currentStatus: string) => {
         const newStatus = currentStatus === 'suspended' ? 'active' : 'suspended';
-        const { success, error } = await updateUserStatus(userId, newStatus as 'active' | 'suspended');
+        const { success, error } = await updateUserStatusAction(userId, newStatus as 'active' | 'suspended');
         if (success) {
             // Refresh users
             loadUsers();
@@ -109,7 +113,9 @@ export default function CustomersPage() {
     const getPlanBadge = (plan: UserProfile["plan"]) => {
         const styles = {
             free: { bg: "rgba(100, 116, 139, 0.2)", color: "#94A3B8", icon: null },
+            starter: { bg: "rgba(16, 185, 129, 0.2)", color: "#10B981", icon: null }, // Emerald for Starter
             pro: { bg: "rgba(250, 204, 21, 0.2)", color: "#FACC15", icon: Crown },
+            promax: { bg: "rgba(249, 115, 22, 0.2)", color: "#F97316", icon: Crown }, // Orange for Pro Max
             enterprise: { bg: "rgba(139, 92, 246, 0.2)", color: "#A78BFA", icon: Crown },
         };
         const style = styles[plan];
@@ -199,7 +205,9 @@ export default function CustomersPage() {
                     >
                         <option value="all">All Plans</option>
                         <option value="free">Free</option>
+                        <option value="starter">Starter</option>
                         <option value="pro">Pro</option>
+                        <option value="promax">Pro Max</option>
                         <option value="enterprise">Enterprise</option>
                     </select>
                 </div>
@@ -217,14 +225,24 @@ export default function CustomersPage() {
                 </select>
 
                 {/* Export Button */}
-                <button
-                    onClick={exportToCSV}
-                    className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition hover:opacity-90"
-                    style={{ background: '#10B981', color: 'white' }}
-                >
-                    <Download className="w-4 h-4" />
-                    Export CSV
-                </button>
+                <div className="flex gap-3">
+                    <button
+                        onClick={() => setShowAddCustomer(true)}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg font-bold transition hover:opacity-90"
+                        style={{ background: '#FACC15', color: '#0F172A' }}
+                    >
+                        <Plus className="w-4 h-4" />
+                        Add Customer
+                    </button>
+                    <button
+                        onClick={exportToCSV}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition hover:opacity-90"
+                        style={{ background: '#10B981', color: 'white' }}
+                    >
+                        <Download className="w-4 h-4" />
+                        Export CSV
+                    </button>
+                </div>
             </div>
 
             {/* Customer Table */}
@@ -354,6 +372,11 @@ export default function CustomersPage() {
                     </div>
                 </div>
             </div>
+            <AddCustomerModal
+                isOpen={showAddCustomer}
+                onClose={() => setShowAddCustomer(false)}
+                onSuccess={() => loadUsers()}
+            />
         </div>
     );
 }

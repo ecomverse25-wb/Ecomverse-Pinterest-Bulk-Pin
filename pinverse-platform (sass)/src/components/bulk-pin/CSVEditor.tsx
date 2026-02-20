@@ -18,46 +18,50 @@ export default function CSVEditor({ isOpen, onClose, pins, csvSettings }: CSVEdi
 
     useEffect(() => {
         if (isOpen && pins.length > 0) {
-            const initialData = generateCSVData(pins, csvSettings);
+            // Move generateCSVData inside or use it from props/callback if it's stable. 
+            // Since generateCSVData is defined inside component and uses currentDate (which changes), 
+            // we should probably just move the logic inside useEffect or useCallback.
+            // But to fix lint quickly and correctly:
+
+            const now = new Date();
+            const intervalMinutes = parseInt(csvSettings.postInterval);
+            const pinsPerDay = csvSettings.pinsPerDay;
+
+            const currentDate = new Date(now);
+            currentDate.setMinutes(Math.ceil(currentDate.getMinutes() / 30) * 30, 0, 0);
+            let pinsScheduledToday = 0;
+
+            const initialData = pins
+                .filter(pin => pin.status === 'complete' && pin.imageUrl)
+                .map((pin) => {
+                    if (pinsScheduledToday >= pinsPerDay) {
+                        currentDate.setDate(currentDate.getDate() + 1);
+                        currentDate.setHours(8, 0, 0, 0);
+                        pinsScheduledToday = 0;
+                    }
+
+                    const publishDate = new Date(currentDate);
+                    currentDate.setMinutes(currentDate.getMinutes() + intervalMinutes);
+                    pinsScheduledToday++;
+
+                    return {
+                        id: pin.id,
+                        title: pin.title,
+                        description: pin.description,
+                        mediaUrl: pin.imageUrl?.startsWith('data:') ? '(auto-filled on export)' : (pin.imageUrl || ''),
+                        link: pin.url,
+                        pinterestBoard: '',
+                        publishDate: formatDateForInput(publishDate),
+                        thumbnail: '',
+                        keywords: pin.tags?.join(', ') || ''
+                    };
+                });
             setCsvData(initialData);
         }
     }, [isOpen, pins, csvSettings]);
 
-    const generateCSVData = (pins: PinData[], settings: CSVSettings): CSVPinData[] => {
-        const now = new Date();
-        const intervalMinutes = parseInt(settings.postInterval);
-        const pinsPerDay = settings.pinsPerDay;
+    // generateCSVData removed as it is now inlined in useEffect
 
-        let currentDate = new Date(now);
-        currentDate.setMinutes(Math.ceil(currentDate.getMinutes() / 30) * 30, 0, 0);
-        let pinsScheduledToday = 0;
-
-        return pins
-            .filter(pin => pin.status === 'complete' && pin.imageUrl)
-            .map((pin) => {
-                if (pinsScheduledToday >= pinsPerDay) {
-                    currentDate.setDate(currentDate.getDate() + 1);
-                    currentDate.setHours(8, 0, 0, 0);
-                    pinsScheduledToday = 0;
-                }
-
-                const publishDate = new Date(currentDate);
-                currentDate.setMinutes(currentDate.getMinutes() + intervalMinutes);
-                pinsScheduledToday++;
-
-                return {
-                    id: pin.id,
-                    title: pin.title,
-                    description: pin.description,
-                    mediaUrl: pin.imageUrl?.startsWith('data:') ? '(auto-filled on export)' : (pin.imageUrl || ''),
-                    link: pin.url,
-                    pinterestBoard: '',
-                    publishDate: formatDateForInput(publishDate),
-                    thumbnail: '',
-                    keywords: pin.tags?.join(', ') || ''
-                };
-            });
-    };
 
     const formatDateForInput = (date: Date): string => {
         const year = date.getFullYear();
@@ -165,8 +169,8 @@ export default function CSVEditor({ isOpen, onClose, pins, csvSettings }: CSVEdi
                 <div className="flex items-center gap-3">
                     <button onClick={handleExportCSV} disabled={isUploading || csvData.length === 0}
                         className={`px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 ${isUploading ? 'bg-emerald-600 text-white cursor-wait' :
-                                csvData.length === 0 ? 'bg-slate-600 text-slate-400 cursor-not-allowed' :
-                                    'bg-emerald-500 hover:bg-emerald-600 text-white'
+                            csvData.length === 0 ? 'bg-slate-600 text-slate-400 cursor-not-allowed' :
+                                'bg-emerald-500 hover:bg-emerald-600 text-white'
                             }`}>
                         {isUploading ? (
                             <><Loader2 className="w-4 h-4 animate-spin" /> Uploading... {uploadProgress}%</>

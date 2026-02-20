@@ -1,8 +1,25 @@
 import Link from "next/link";
 import { Check, Lock, ArrowRight } from "lucide-react";
+import { getVisibleToolsForCurrentUser } from "@/app/actions/tool-actions";
 
-export default function ToolsPage() {
+export default async function ToolsPage() {
+    const visibleTools = await getVisibleToolsForCurrentUser();
+    const visibleToolIds = new Set(visibleTools.map(t => t.id));
+
     const tools = [
+        {
+            id: "article-writer",
+            name: "PinVerse Master Writer",
+            description: "Turn keywords into SEO articles and Pinterest assets in 3 simple steps.",
+            features: [
+                "Pinterest Trend Research",
+                "Keyword Clustering",
+                "SEO Article Generation",
+                "Auto-Pin Factory"
+            ],
+            status: visibleToolIds.has("article-writer") ? "available" : "coming_soon",
+            href: "/dashboard/tools/article-writer",
+        },
         {
             id: "bulk-pin-creator",
             name: "Bulk Pin Creator",
@@ -13,7 +30,7 @@ export default function ToolsPage() {
                 "CSV export with scheduling",
                 "ImgBB auto-upload",
             ],
-            status: "available",
+            status: visibleToolIds.has("bulk-pin-creator") ? "available" : "coming_soon",
             href: "/dashboard/tools/bulk-pin-creator",
         },
         {
@@ -25,8 +42,8 @@ export default function ToolsPage() {
                 "Best time analysis",
                 "Multi-board support",
             ],
-            status: "coming_soon",
-            href: "#",
+            status: visibleToolIds.has("pinterest-scheduler") ? "available" : "coming_soon",
+            href: "/dashboard/tools/pinterest-scheduler",
         },
         {
             id: "keyword-research",
@@ -37,7 +54,7 @@ export default function ToolsPage() {
                 "Competition analysis",
                 "SEO suggestions",
             ],
-            status: "coming_soon",
+            status: visibleToolIds.has("keyword-research") ? "available" : "coming_soon",
             href: "#",
         },
         {
@@ -49,8 +66,8 @@ export default function ToolsPage() {
                 "Traffic tracking",
                 "Growth metrics",
             ],
-            status: "coming_soon",
-            href: "#",
+            status: visibleToolIds.has("analytics") ? "available" : "coming_soon",
+            href: "/dashboard/tools/analytics",
         },
     ];
 

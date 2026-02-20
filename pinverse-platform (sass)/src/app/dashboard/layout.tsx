@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Wrench, Settings, CreditCard, LogOut, Menu, X, Sun, Moon, Shield } from "lucide-react";
+import { LayoutDashboard, Wrench, Settings, CreditCard, LogOut, Menu, X, Sun, Moon, Shield, FileText } from "lucide-react";
 import { useState, useEffect } from "react";
 import { getUser, signOut } from "@/lib/supabase";
 import { isAdmin } from "@/lib/admin";
@@ -26,13 +26,22 @@ export default function DashboardLayout({
 
     const checkUser = async () => {
         try {
-            const { user, error } = await getUser();
+            // Add timeout to prevent infinite loading
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Auth timeout')), 5000)
+            );
+
+            const authPromise = getUser();
+
+            const { user, error } = await Promise.race([authPromise, timeoutPromise]) as { user: any, error: any };
+
             if (error || !user) {
                 router.push("/login");
                 return;
             }
             setUser(user);
         } catch (err) {
+            console.error("Auth check failed:", err);
             router.push("/login");
         } finally {
             setLoading(false);

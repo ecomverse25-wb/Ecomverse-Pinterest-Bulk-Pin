@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 
-type Theme = 'dark' | 'light';
+type Theme = 'light' | 'dark';
 
 interface ThemeContextType {
     theme: Theme;
@@ -13,47 +13,42 @@ interface ThemeContextType {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
+    // Start with 'dark' to match SSR default in layout
     const [theme, setThemeState] = useState<Theme>('dark');
-    const [mounted, setMounted] = useState(false);
 
     useEffect(() => {
-        // Load theme from localStorage on mount
+        // Only access localStorage on client mount
         const savedTheme = localStorage.getItem('pinverse_theme') as Theme;
         if (savedTheme === 'light' || savedTheme === 'dark') {
             setThemeState(savedTheme);
+
+            // Sync class immediately
+            if (savedTheme === 'light') {
+                document.documentElement.classList.remove('dark');
+                document.documentElement.classList.add('light');
+            } else {
+                document.documentElement.classList.remove('light');
+                document.documentElement.classList.add('dark');
+            }
         }
-        setMounted(true);
     }, []);
-
-    useEffect(() => {
-        if (!mounted) return;
-
-        // Update the HTML class when theme changes
-        const root = document.documentElement;
-        if (theme === 'dark') {
-            root.classList.add('dark');
-            root.classList.remove('light');
-        } else {
-            root.classList.remove('dark');
-            root.classList.add('light');
-        }
-
-        // Save to localStorage
-        localStorage.setItem('pinverse_theme', theme);
-    }, [theme, mounted]);
-
-    const toggleTheme = () => {
-        setThemeState(prev => prev === 'dark' ? 'light' : 'dark');
-    };
 
     const setTheme = (newTheme: Theme) => {
         setThemeState(newTheme);
+        localStorage.setItem('pinverse_theme', newTheme);
+
+        if (newTheme === 'dark') {
+            document.documentElement.classList.remove('light');
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.classList.add('light');
+        }
     };
 
-    // Prevent flash of wrong theme
-    if (!mounted) {
-        return null;
-    }
+    const toggleTheme = () => {
+        setTheme(theme === 'dark' ? 'light' : 'dark');
+    };
 
     return (
         <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>
