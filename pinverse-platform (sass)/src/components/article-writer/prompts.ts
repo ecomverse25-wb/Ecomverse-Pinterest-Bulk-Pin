@@ -49,6 +49,13 @@ FORMATTING:
 - NO Markdown, code fences, or backticks
 - No extraneous preamble before content starts
 
+
+TOPICAL RELEVANCE:
+- Every H2 section MUST be directly relevant to the main topic: "{title}"
+- Do NOT add unrelated or tangential sections
+- Every section must help the reader understand or apply the main keyword topic
+- Stay focused — if the topic is about a specific product category, every section should feature items from that category
+
 Date: {date}
 `;
 
