@@ -91,9 +91,19 @@ export async function matchProductsToSectionsAction(
         .map((name, i) => `${i + 1}. "${name}"`)
         .join("\n");
 
-    const prompt = `You are a product matcher. Given a list of products and a list of article sections, find the best matching product for each section.
+    const prompt = `You are a strict product matcher. Given a list of products and a list of article sections, find the best matching product for each section.
 Only match a product if it is GENUINELY relevant to the section topic.
 If no product is relevant, return null for that section.
+
+STRICT RULE: Only return a product match if the product could REALISTICALLY appear in the same sentence as the H2 topic.
+For example, a 'Ladle Spoon' should NEVER match 'Pull-Out Drawer Systems'.
+A 'Coffee Mug' should NEVER match 'Open Shelving'.
+When in doubt, return null. A placeholder or AI image is always better than an irrelevant product.
+
+Confidence definitions:
+- "high": product IS the topic (e.g., storage organizer for a storage section)
+- "medium": product BELONGS IN the context (e.g., a pot organizer for a pots & pans section)
+- "low" or "none": return null — DO NOT FORCE A MATCH
 
 Article title: ${articleTitle}
 Article keyword: ${targetKeyword}
@@ -110,7 +120,6 @@ Return JSON array only, one entry per section:
   { "sectionIndex": 1, "productIndex": null, "confidence": "none" },
   ...
 ]
-confidence: "high" = clearly relevant, "medium" = somewhat relevant, "low" = loose match, "none" = no match (return null productIndex)
 Only return "high" or "medium" confidence matches. For "low" or "none", set productIndex to null.
 
 IMPORTANT: Return ONLY the raw JSON array. No markdown, no code fences, no explanation.`;
@@ -139,6 +148,32 @@ IMPORTANT: Return ONLY the raw JSON array. No markdown, no code fences, no expla
         return { success: true, matches: sanitized };
     } catch (error: any) {
         console.error("Product matching AI error:", error);
+        const msg = error instanceof Error ? error.message : "Unknown error";
+        return { error: msg };
+    }
+}
+
+// --- AI image generation for unmatched H2 sections ---
+
+export async function generateSectionImageAction(
+    h2Title: string,
+    articleKeyword: string,
+    replicateKey: string
+): Promise<{ success?: boolean; imageUrl?: string; error?: string }> {
+    if (!replicateKey) return { error: "Replicate API key is missing." };
+
+    const prompt = `Pinterest pin image, portrait 2:3 ratio, ${articleKeyword} topic: ${h2Title}, professional product photography style, bright natural lighting, white background`;
+
+    try {
+        const { generatePinterestImageReplicate } = await import("@/lib/replicate-enhanced");
+        const result = await generatePinterestImageReplicate(replicateKey, prompt, 'flux-dev', '9:16');
+
+        if (result.success && result.imageUrl) {
+            return { success: true, imageUrl: result.imageUrl };
+        }
+        return { error: result.error || "Image generation failed" };
+    } catch (error: any) {
+        console.error("Section image generation error:", error);
         const msg = error instanceof Error ? error.message : "Unknown error";
         return { error: msg };
     }

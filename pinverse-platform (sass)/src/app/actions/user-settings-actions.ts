@@ -6,6 +6,8 @@ export interface UserSettings {
     gemini_api_key?: string;
     replicate_api_key?: string;
     imgbb_api_key?: string;
+    anthropic_api_key?: string;
+    openai_api_key?: string;
 }
 
 export async function getUserSettingsAction(): Promise<{ settings: UserSettings | null; error: string | null }> {
@@ -19,7 +21,7 @@ export async function getUserSettingsAction(): Promise<{ settings: UserSettings 
 
         const { data, error } = await supabase
             .from('user_settings')
-            .select('gemini_api_key, replicate_api_key, imgbb_api_key')
+            .select('gemini_api_key, replicate_api_key, imgbb_api_key, anthropic_api_key, openai_api_key')
             .eq('user_id', user.id)
             .single();
 

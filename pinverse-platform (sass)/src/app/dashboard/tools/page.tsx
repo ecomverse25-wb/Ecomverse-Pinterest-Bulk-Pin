@@ -34,6 +34,22 @@ export default async function ToolsPage() {
             href: "/dashboard/tools/bulk-pin-creator",
         },
         {
+            id: "blog-monetizer",
+            name: "Blog Monetizer 💰",
+            description: "Create monetized blog articles with AI images, affiliate links, display ad placements, and Pinterest-ready pins.",
+            features: [
+                "Human-like AI writing",
+                "AI image per H2 section",
+                "Affiliate link injection",
+                "Display ad placements",
+                "Pinterest pins export",
+                "Bulk keyword generation",
+                "WordPress auto-publish",
+            ],
+            status: "available" as const,
+            href: "/dashboard/tools/blog-monetizer",
+        },
+        {
             id: "pinterest-scheduler",
             name: "Pinterest Scheduler",
             description: "Schedule your pins for optimal posting times. Automate your Pinterest workflow with smart scheduling.",
@@ -44,6 +60,19 @@ export default async function ToolsPage() {
             ],
             status: visibleToolIds.has("pinterest-scheduler") ? "available" : "coming_soon",
             href: "/dashboard/tools/pinterest-scheduler",
+        },
+        {
+            id: "sitemap-extractor",
+            name: "Sitemap Product Extractor",
+            description: "Upload a product sitemap XML to extract product names, links, and images. Export results as a clean CSV file.",
+            features: [
+                "XML sitemap parsing",
+                "Product data extraction",
+                "WooCommerce support",
+                "CSV export",
+            ],
+            status: "available" as const,
+            href: "/dashboard/tools/sitemap-extractor",
         },
         {
             id: "keyword-research",

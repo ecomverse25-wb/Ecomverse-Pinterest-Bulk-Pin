@@ -4,11 +4,15 @@ import { useState, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Settings, FileText, Image as ImageIcon, Layers, Save, Trash2, Key, Globe, User } from "lucide-react";
+import { Settings, FileText, Image as ImageIcon, Layers, Save, Trash2, Key, Globe, User, ChevronDown, ChevronRight } from "lucide-react";
 import KeywordStrategy from "./KeywordStrategy";
 import ContentEngine from "./ContentEngine";
 import PinFactory from "./PinFactory";
 import PromptSettings from "./PromptSettings";
+import {
+    DEFAULT_IMAGE_PROMPT_TEMPLATE, IMAGE_STYLE_OPTIONS, IMAGE_DIMENSION_OPTIONS,
+    type ImageStyle, type ImageDimensions, type FeaturedImageSettings,
+} from "@/components/blog-monetizer/BlogMonetizer.types";
 
 // Shared Types
 export interface KeywordCluster {
@@ -30,11 +34,13 @@ export interface ArticleData {
     wpLink?: string;
 }
 
-// Model Options
+// Model Options — Google Gemini (2025/2026)
 const AI_MODELS = [
-    { value: "gemini-2.0-flash", label: "Google Gemini 2.0 Flash (Recommended)" },
-    { value: "gemini-2.5-pro", label: "Google Gemini 2.5 Pro (Advanced)" },
-    { value: "replicate", label: "Replicate (Custom Models)" },
+    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro (Most Capable)" },
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash ⭐ Recommended" },
+    { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite (Fastest)" },
+    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash (Stable)" },
+    { value: "gemini-2.0-flash-lite", label: "Gemini 2.0 Flash-Lite (Economy)" },
 ];
 
 import { getUser } from "@/lib/supabase";
@@ -117,8 +123,35 @@ export default function ArticleWriterTool() {
     const [imgbbKey, setImgbbKey] = useState("");
     const [activePinterestToken, setActivePinterestToken] = useState("");
 
+    // Featured Image Settings
+    const [featuredImageOpen, setFeaturedImageOpen] = useState(false);
+    const [featuredImageSettings, setFeaturedImageSettings] = useState<FeaturedImageSettings>({
+        promptTemplate: DEFAULT_IMAGE_PROMPT_TEMPLATE,
+        style: 'lifestyle' as ImageStyle,
+        colorMood: '',
+        dimensions: '1024x1536' as ImageDimensions,
+    });
+
+    // Load featured image settings from localStorage
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('mw_featured_image_settings');
+            if (saved) {
+                try { setFeaturedImageSettings(JSON.parse(saved)); } catch { }
+            }
+        }
+    }, []);
+
+    const updateFeaturedImageSettings = (patch: Partial<FeaturedImageSettings>) => {
+        setFeaturedImageSettings(prev => {
+            const next = { ...prev, ...patch };
+            if (typeof window !== 'undefined') localStorage.setItem('mw_featured_image_settings', JSON.stringify(next));
+            return next;
+        });
+    };
+
     // Model Selection
-    const [selectedModel, setSelectedModel] = useState("gemini-1.5-flash");
+    const [selectedModel, setSelectedModel] = useState("gemini-2.5-flash");
 
     // WordPress Creds (Local state for now)
     const [wpUrl, setWpUrl] = useState("");
@@ -332,6 +365,73 @@ export default function ArticleWriterTool() {
                             </div>
                         </div>
 
+                        {/* Featured Image Settings (Collapsible) */}
+                        <div className="border-t pt-4 border-border/50">
+                            <button
+                                onClick={() => setFeaturedImageOpen(!featuredImageOpen)}
+                                className="flex items-center gap-2 text-sm font-semibold w-full text-left"
+                            >
+                                <ImageIcon className="w-4 h-4 text-amber-400" />
+                                Featured Image Settings
+                                {featuredImageOpen ? <ChevronDown className="w-4 h-4 ml-auto text-muted-foreground" /> : <ChevronRight className="w-4 h-4 ml-auto text-muted-foreground" />}
+                            </button>
+                            {featuredImageOpen && (
+                                <div className="mt-3 space-y-4">
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-muted-foreground">AI Image Prompt Template</label>
+                                        <textarea
+                                            rows={5}
+                                            className="w-full p-2 rounded-md border bg-background text-sm"
+                                            value={featuredImageSettings.promptTemplate}
+                                            onChange={(e) => updateFeaturedImageSettings({ promptTemplate: e.target.value })}
+                                        />
+                                        <p className="text-xs text-muted-foreground">{"\uD83D\uDCA1"} Use {"{" + "title" + "}"} for article title and {"{" + "content" + "}"} for summary</p>
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-medium text-muted-foreground">Image Style</label>
+                                            <select
+                                                className="w-full p-2 h-9 rounded-md border bg-background text-sm"
+                                                value={featuredImageSettings.style}
+                                                onChange={(e) => updateFeaturedImageSettings({ style: e.target.value as ImageStyle })}
+                                            >
+                                                {IMAGE_STYLE_OPTIONS.map(o => (
+                                                    <option key={o.value} value={o.value}>{o.label}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <label className="text-xs font-medium text-muted-foreground">Color Mood (optional)</label>
+                                            <input
+                                                type="text"
+                                                className="w-full p-2 h-9 rounded-md border bg-background text-sm"
+                                                placeholder="e.g. warm neutrals, sage green"
+                                                value={featuredImageSettings.colorMood}
+                                                onChange={(e) => updateFeaturedImageSettings({ colorMood: e.target.value })}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-medium text-muted-foreground">Image Dimensions</label>
+                                        <div className="flex gap-4">
+                                            {IMAGE_DIMENSION_OPTIONS.map(o => (
+                                                <label key={o.value} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                                                    <input
+                                                        type="radio"
+                                                        name="mw-img-dim"
+                                                        value={o.value}
+                                                        checked={featuredImageSettings.dimensions === o.value}
+                                                        onChange={(e) => updateFeaturedImageSettings({ dimensions: e.target.value as ImageDimensions })}
+                                                    />
+                                                    {o.label}
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
                     </div>
                 </CardContent>
             </Card>
@@ -372,6 +472,7 @@ export default function ArticleWriterTool() {
                         clusters={clusters}
                         products={products}
                         apiKey={apiKey}
+                        replicateKey={replicateKey}
                         wpCredentials={{ url: wpUrl, user: wpUser, password: wpPassword }}
                         articles={generatedArticles}
                         setArticles={updateArticles}
