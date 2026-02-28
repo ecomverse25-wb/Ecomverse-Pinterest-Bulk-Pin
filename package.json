@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "dev": "npm run dev --prefix \"pinverse-platform (sass)\" -- --webpack",
+    "build": "npm run build --prefix \"pinverse-platform (sass)\"",
+    "start": "npm run start --prefix \"pinverse-platform (sass)\""
+  },
+  "dependencies": {
+    "papaparse": "^5.5.3"
+  }
+}
