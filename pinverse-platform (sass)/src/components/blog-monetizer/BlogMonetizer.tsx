@@ -1,3 +1,4 @@
+// v3.2
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -20,7 +21,7 @@ import {
     publishBlogToWPAction,
 } from "@/app/actions/blog-monetizer/generate";
 import {
-    generateFeaturedImageAction, generateH2ImageAction,
+    generateFeaturedImageAction, generateH2ImageAction, testImageProviderAction
 } from "@/app/actions/blog-monetizer/generate-image";
 import BlogMonetizerEditor from "./BlogMonetizerEditor";
 import BlogMonetizerPinExport from "./BlogMonetizerPinExport";
@@ -128,11 +129,27 @@ export default function BlogMonetizer() {
     // ─── Image settings collapsed ───
     const [imageSettingsOpen, setImageSettingsOpen] = useState(false);
 
+    // ─── Test API State ───
+    const [testImageResult, setTestImageResult] = useState<{ status: 'idle' | 'testing' | 'success' | 'error', url?: string, error?: string }>({ status: 'idle' });
+
     // Affiliates textarea
     const [affiliatesText, setAffiliatesText] = useState(() => {
         const links = loadLS<AffiliateLink[]>("affiliateLinks", []);
         return links.map(a => `${a.productName} | ${a.url}`).join("\n");
     });
+
+    // ─── Session Cache Clearing ───
+    const SESSION_VERSION = "v6"; // v3.2 upgrade: pin styles, per-pin fields, featured image 1200x628
+    useEffect(() => {
+        const savedVersion = localStorage.getItem("bm-session-version");
+        if (savedVersion !== SESSION_VERSION) {
+            localStorage.removeItem("blog-monetizer-session"); // old direct backup
+            localStorage.removeItem("bm_articles"); // actual key used for articles if it was persisted
+            localStorage.setItem("bm-session-version", SESSION_VERSION);
+            setArticles([]); // clear stale items
+            console.log(`[SESSION] Cache cleared — version bumped to ${SESSION_VERSION}`);
+        }
+    }, []);
 
     // ─── Load API Keys from DB ───
     useEffect(() => {
@@ -385,11 +402,13 @@ export default function BlogMonetizer() {
 
                 let finalContent = artResult.content;
 
-                // Extract AI-generated title from the H1 tag in the content
-                let generatedTitle = item.title;
-                const h1Match = finalContent.match(/<h1[^>]*>(.*?)<\/h1>/i);
-                if (h1Match) {
-                    generatedTitle = h1Match[1].replace(/<[^>]*>/g, "").trim();
+                // Use the returned title or default back to H1 extraction
+                let generatedTitle = artResult.title || item.title;
+                if (!artResult.title) {
+                    const h1Match = finalContent.match(/<h1[^>]*>(.*?)<\/h1>/i);
+                    if (h1Match) {
+                        generatedTitle = h1Match[1].replace(/<[^>]*>/g, "").trim();
+                    }
                 }
 
                 // Step 2: Inject affiliate links
@@ -423,13 +442,20 @@ export default function BlogMonetizer() {
                     // Featured image
                     setStatusMessage(`🖼️ Generating featured image: "${item.keyword}"`);
                     try {
+                        if (imageProvider === "google-imagen" && (!geminiKey || geminiKey.trim() === "")) {
+                            throw new Error("Gemini API key is missing. Please add it in Setup.");
+                        }
+                        if (imageProvider === "replicate" && (!replicateKey || replicateKey.trim() === "")) {
+                            throw new Error("Replicate API key is missing. Please add it in Setup.");
+                        }
+
                         const summary = finalContent.replace(/<[^>]*>/g, " ").slice(0, 800);
                         const featResult = await generateFeaturedImageAction(
                             generatedTitle, summary,
                             settings.featuredImage.promptTemplate,
                             settings.featuredImage.style,
                             settings.featuredImage.colorMood,
-                            settings.featuredImage.dimensions,
+                            "1200x628",
                             geminiKey, replicateKey, imgbbKey, writingModel,
                             imageProvider, imageModel
                         );
@@ -446,8 +472,33 @@ export default function BlogMonetizer() {
                     }
 
                     // H2 section images — generate sequentially with progress
+                    const FAQ_HEADINGS = [
+                        "frequently asked questions",
+                        "faq", "f.a.q",
+                        "common questions",
+                        "questions and answers",
+                        "q&a", "q & a",
+                        "people also ask",
+                        "questions about",
+                    ];
+
                     for (let j = 0; j < h2Headings.length; j++) {
+                        const headingLower = h2Headings[j].toLowerCase().trim();
+                        const isFAQ = FAQ_HEADINGS.some(f => headingLower.includes(f));
+
+                        if (isFAQ) {
+                            console.log(`[FAQ SKIP] Skipping image generation for FAQ section: "${h2Headings[j]}"`);
+                            sectionImages.push({
+                                h2Index: j,
+                                h2Title: h2Headings[j],
+                                imageUrl: "",
+                                isFAQ: true,
+                            });
+                            continue; // Skip API call
+                        }
+
                         setStatusMessage(`🎨 Generating section images: ${j + 1}/${h2Headings.length} — "${item.keyword}"`);
+                        let sectionImageUrl: string | undefined;
                         try {
                             const secResult = await generateH2ImageAction(
                                 h2Headings[j], settings.niche, replicateKey, imgbbKey,
@@ -455,15 +506,36 @@ export default function BlogMonetizer() {
                                 settings.featuredImage.dimensions
                             );
                             if (secResult.success && secResult.imageUrl) {
-                                sectionImages.push({
-                                    h2Index: j,
-                                    h2Title: h2Headings[j],
-                                    imageUrl: secResult.imageUrl,
-                                });
+                                sectionImageUrl = secResult.imageUrl;
                             }
                         } catch (err) {
                             console.error(`[BlogMonetizer] Section image ${j} failed:`, err);
                         }
+
+                        // Retry once if first attempt failed
+                        if (!sectionImageUrl) {
+                            console.log(`[Images] Retrying failed image for: "${h2Headings[j]}"`);
+                            setStatusMessage(`🔄 Retrying section image ${j + 1}/${h2Headings.length} — "${item.keyword}"`);
+                            try {
+                                const retryResult = await generateH2ImageAction(
+                                    h2Headings[j], settings.niche, replicateKey, imgbbKey,
+                                    imageProvider, imageModel, geminiKey,
+                                    settings.featuredImage.dimensions
+                                );
+                                if (retryResult.success && retryResult.imageUrl) {
+                                    sectionImageUrl = retryResult.imageUrl;
+                                }
+                            } catch (retryErr) {
+                                console.error(`[Images] Retry also failed for: "${h2Headings[j]}"`, retryErr);
+                            }
+                        }
+
+                        // Always push — empty imageUrl will show placeholder in editor
+                        sectionImages.push({
+                            h2Index: j,
+                            h2Title: h2Headings[j],
+                            imageUrl: sectionImageUrl || "",
+                        });
                     }
                 } else {
                     imageError = `${imageProvider === "google-imagen" ? "Gemini" : "Replicate"} API key not set — images skipped`;
@@ -479,11 +551,14 @@ export default function BlogMonetizer() {
                         finalContent = finalContent.replace(h2CloseRegex, (match) => {
                             if (count === img.h2Index) {
                                 count++;
+
+                                // Skip injection if FAQ or no real image
+                                if (!img.imageUrl || img.isFAQ) return match;
+
                                 return `${match}
-<div style="margin:12px 0;position:relative;">
-  <img src="${img.imageUrl}" alt="${img.h2Title}" style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:12px;" />
-  <span style="position:absolute;bottom:8px;left:8px;background:rgba(0,0,0,0.7);color:#f0c040;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:600;">AI Generated</span>
-</div>`;
+<figure style="max-width:500px;margin:12px auto;position:relative;">
+  <img src="${img.imageUrl}" alt="${img.h2Title}" style="width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:12px;display:block;" />
+</figure>`;
                             }
                             count++;
                             return match;
@@ -557,6 +632,17 @@ export default function BlogMonetizer() {
             await new Promise(r => setTimeout(r, 1000));
         }
         setStatusMessage("✅ All articles published to WordPress!");
+    };
+
+    // ─── Test Image API ───
+    const handleTestImageApi = async () => {
+        setTestImageResult({ status: 'testing' });
+        const result = await testImageProviderAction(imageProvider, imageModel, geminiKey, replicateKey);
+        if (result.success && result.imageUrl) {
+            setTestImageResult({ status: 'success', url: result.imageUrl });
+        } else {
+            setTestImageResult({ status: 'error', error: result.error || "Unknown error" });
+        }
     };
 
     // ─── Export functions ───
@@ -731,11 +817,34 @@ export default function BlogMonetizer() {
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                                 <div>
                                     <label style={labelStyle}>Image Model</label>
-                                    <select value={imageModel} onChange={e => setImageModel(e.target.value)} style={selectStyle}>
-                                        {IMAGE_MODELS_BY_PROVIDER[imageProvider].map(m => (
-                                            <option key={m.value} value={m.value}>{m.label}</option>
-                                        ))}
-                                    </select>
+                                    <div style={{ display: "flex", gap: 8 }}>
+                                        <select value={imageModel} onChange={e => setImageModel(e.target.value)} style={{ ...selectStyle, flex: 1 }}>
+                                            {IMAGE_MODELS_BY_PROVIDER[imageProvider].map(m => (
+                                                <option key={m.value} value={m.value}>{m.label}</option>
+                                            ))}
+                                        </select>
+                                        <button onClick={handleTestImageApi} disabled={testImageResult.status === 'testing'} style={secondaryBtnStyle}>
+                                            {testImageResult.status === 'testing' ? '⏳ Testing...' : '🧪 Test Image API'}
+                                        </button>
+                                    </div>
+                                    {testImageResult.status === 'success' && (
+                                        <div style={{ marginTop: 8, padding: 8, background: "#10b98120", border: "1px solid #10b981", borderRadius: 8 }}>
+                                            <p style={{ color: "#10b981", fontSize: 13, margin: "0 0 8px 0", fontWeight: 600 }}>✅ {imageProvider === 'google-imagen' ? 'Google Imagen' : 'Replicate'} working! Test image generated.</p>
+                                            <img src={testImageResult.url} alt="Test" style={{ width: 100, height: 100, borderRadius: 6, objectFit: "cover" }} />
+                                        </div>
+                                    )}
+                                    {testImageResult.status === 'error' && (
+                                        <div style={{ marginTop: 8, padding: 8, background: "#ef444420", border: "1px solid #ef4444", borderRadius: 8 }}>
+                                            <p style={{ color: "#ef4444", fontSize: 13, margin: 0, fontWeight: 600 }}>❌ Failed: {testImageResult.error}</p>
+                                        </div>
+                                    )}
+                                    {imageProvider === 'google-imagen' && (
+                                        <div style={{ marginTop: 8, padding: 8, background: "#3b82f61a", border: "1px solid #3b82f640", borderRadius: 8 }}>
+                                            <p style={{ color: "#94a3b8", fontSize: 12, margin: 0 }}>
+                                                ℹ️ Imagen 4 is not yet available via standard Gemini API keys. Using Google&apos;s native Gemini image models which are fully supported and produce excellent results.
+                                            </p>
+                                        </div>
+                                    )}
                                 </div>
                                 <div>
                                     {/* Show image key field — shared if same provider as writing */}
@@ -802,7 +911,13 @@ export default function BlogMonetizer() {
                             <div>
                                 <label style={labelStyle}>H2 Sections</label>
                                 <select value={settings.h2Count} onChange={e => updateSettings({ h2Count: Number(e.target.value) as H2Count })} style={selectStyle}>
-                                    {H2_COUNT_OPTIONS.map(n => <option key={n} value={n}>{n} sections</option>)}
+                                    <option value="3">3 sections</option>
+                                    <option value="5">5 sections</option>
+                                    <option value="7">7 sections</option>
+                                    <option value="9">9 sections</option>
+                                    <option value="11">11 sections</option>
+                                    <option value="13">13 sections</option>
+                                    <option value="15">15 sections</option>
                                 </select>
                             </div>
                             <div style={{ gridColumn: "span 3" }}>
@@ -1131,7 +1246,7 @@ export default function BlogMonetizer() {
 
             {/* ━━━━━━━━ PINTEREST PINS TAB ━━━━━━━━ */}
             {activeTab === "pins" && (
-                <BlogMonetizerPinExport articles={articles} wpBaseUrl={wpUrl} />
+                <BlogMonetizerPinExport articles={articles} wpBaseUrl={wpUrl} geminiKey={geminiKey} geminiModel={writingModel} />
             )}
         </div>
     );

@@ -1,8 +1,9 @@
+// v3.2
 // ─── Blog Monetizer Types ───
 
 export type Tone = 'conversational' | 'authoritative' | 'storytelling' | 'listicle' | 'how-to';
 export type ArticleLength = 'short' | 'standard' | 'long';
-export type H2Count = 3 | 5 | 7;
+export type H2Count = 3 | 5 | 7 | 9 | 11 | 13 | 15;
 
 export type ImageStyle =
     | 'lifestyle'
@@ -14,7 +15,7 @@ export type ImageStyle =
     | 'warm-cozy'
     | 'custom';
 
-export type ImageDimensions = '1024x1536' | '1536x864' | '1024x1024';
+export type ImageDimensions = '1024x1536' | '1536x864' | '1024x1024' | '1200x628';
 
 // ─── Provider Types ───
 export type WritingProvider = 'google' | 'claude' | 'openai' | 'replicate';
@@ -22,8 +23,10 @@ export type ImageProvider = 'google-imagen' | 'replicate';
 
 // ─── Writing Model Lists ───
 export const GEMINI_WRITING_MODELS = [
-    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro ★ Best Quality' },
-    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash ⚡ Recommended' },
+    { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro 🆕 Most Advanced' },
+    { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash ⚡ Frontier Performance' },
+    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro ★ Best Stable' },
+    { value: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash ⭐ Recommended' },
     { value: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash-Lite 💰 Fastest' },
 ];
 export const CLAUDE_WRITING_MODELS = [
@@ -45,8 +48,9 @@ export const REPLICATE_WRITING_MODELS = [
 
 // ─── Image Model Lists ───
 export const GOOGLE_IMAGE_MODELS = [
-    { value: 'imagen-3.0-generate-002', label: 'Imagen 3 ★ Best Quality — $0.03/img' },
-    { value: 'imagen-3.0-fast-generate-001', label: 'Imagen 3 Fast ⚡ — $0.02/img' },
+    { value: 'gemini-2.5-flash-image', label: 'Nano Banana ★ Recommended — Fast Creative Workflows' },
+    { value: 'gemini-3.1-flash-image-preview', label: 'Nano Banana 2 ⚡ High Volume Fast' },
+    { value: 'gemini-3-pro-image-preview', label: 'Nano Banana Pro 🎨 4K Studio Quality' },
 ];
 export const REPLICATE_IMAGE_MODELS = [
     { value: 'black-forest-labs/flux-2-pro', label: 'Flux 2 Pro ★ Best Quality — ~$0.05' },
@@ -70,7 +74,7 @@ export const DEFAULT_WRITING_MODELS: Record<WritingProvider, string> = {
     replicate: 'deepseek-ai/deepseek-v3',
 };
 export const DEFAULT_IMAGE_MODELS: Record<ImageProvider, string> = {
-    'google-imagen': 'imagen-3.0-generate-002',
+    'google-imagen': 'gemini-2.5-flash-image',
     replicate: 'black-forest-labs/flux-1.1-pro',
 };
 
@@ -118,6 +122,7 @@ export interface SectionImage {
     h2Title: string;
     imageUrl: string;
     prompt?: string;
+    isFAQ?: boolean;
 }
 
 export interface BlogArticle {
@@ -136,13 +141,44 @@ export interface BlogArticle {
     wpPostId?: number;
 }
 
+export type PinStyleType =
+    | 'top-banner'
+    | 'bottom-frame'
+    | 'center-overlay'
+    | 'center-badge'
+    | 'top-title-collage'
+    | 'split-stack'
+    | 'retro-bubble'
+    | 'tri-photo-stack';
+
+export const PIN_STYLE_OPTIONS: { value: PinStyleType; label: string }[] = [
+    { value: 'top-banner', label: 'Top Banner' },
+    { value: 'bottom-frame', label: 'Bottom Frame' },
+    { value: 'center-overlay', label: 'Center Overlay' },
+    { value: 'center-badge', label: 'Center Badge' },
+    { value: 'top-title-collage', label: 'Top Title + Collage' },
+    { value: 'split-stack', label: 'Split Stack' },
+    { value: 'retro-bubble', label: 'Retro Bubble' },
+    { value: 'tri-photo-stack', label: 'Tri-Photo Stack' },
+];
+
+export const ALL_PIN_STYLES: PinStyleType[] = PIN_STYLE_OPTIONS.map(o => o.value);
+
 export interface PinData {
     imageUrl: string;
+    overlayImageUrl?: string;
     title: string;
     description: string;
     destinationUrl: string;
     sourceArticleKeyword: string;
+    sectionHeading: string;
     type: 'featured' | 'section';
+    pinTargetKeyword: string;
+    pinAnnotatedInterests: string;
+    pinTitle: string;
+    pinDescription: string;
+    pinStyle: PinStyleType;
+    mainArticleTitle: string;
 }
 
 export interface WPCredentials {
@@ -161,7 +197,7 @@ Generate a detailed image prompt that:
 - Captures the OVERALL theme of the entire article, not just one section
 - Uses lifestyle photography style: warm, natural, aspirational
 - Includes specific scene details: lighting, composition, mood, colors
-- Is optimized for Pinterest (portrait, visually striking)
+- Is optimized for WordPress featured image (landscape 1200x628, visually striking)
 - Avoids text, logos, faces, or watermarks
 - Feels editorial and magazine-quality
 
@@ -191,6 +227,7 @@ export const IMAGE_STYLE_OPTIONS: { value: ImageStyle; label: string }[] = [
 ];
 
 export const IMAGE_DIMENSION_OPTIONS: { value: ImageDimensions; label: string; ratio: string }[] = [
+    { value: '1200x628', label: '🖼️ WordPress Featured 1.91:1', ratio: '1.91:1' },
     { value: '1024x1536', label: '📌 Pinterest Portrait 2:3', ratio: '2:3' },
     { value: '1536x864', label: '🖥️ Blog Header 16:9', ratio: '16:9' },
     { value: '1024x1024', label: '⬜ Square 1:1', ratio: '1:1' },
@@ -210,7 +247,7 @@ export const ARTICLE_LENGTH_OPTIONS: { value: ArticleLength; label: string; word
     { value: 'long', label: 'Long', words: '~2500 words' },
 ];
 
-export const H2_COUNT_OPTIONS: H2Count[] = [3, 5, 7];
+export const H2_COUNT_OPTIONS: H2Count[] = [3, 5, 7, 9, 11, 13, 15];
 
 export const DEFAULT_SETTINGS: BlogMonetizerSettings = {
     niche: '',
@@ -222,6 +259,6 @@ export const DEFAULT_SETTINGS: BlogMonetizerSettings = {
         promptTemplate: DEFAULT_IMAGE_PROMPT_TEMPLATE,
         style: 'lifestyle',
         colorMood: '',
-        dimensions: '1024x1536',
+        dimensions: '1200x628',
     },
 };

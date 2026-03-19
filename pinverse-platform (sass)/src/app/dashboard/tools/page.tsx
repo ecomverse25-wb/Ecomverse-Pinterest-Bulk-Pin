@@ -50,6 +50,23 @@ export default async function ToolsPage() {
             href: "/dashboard/tools/blog-monetizer",
         },
         {
+            id: "food-seo-writer",
+            name: "Food SEO Writer 🍳",
+            description: "Create food blog content that ranks on Google AND gets saved on Pinterest. Built on pillar/cluster SEO architecture with Rank Math 80+ targeting.",
+            features: [
+                "Pillar/Cluster SEO architecture",
+                "Food-specific AI writing",
+                "Schema markup (ItemList, HowTo, Recipe)",
+                "Pinterest pin variations",
+                "SEO compliance scoring",
+                "Authority source linking",
+                "WordPress auto-publish",
+            ],
+            status: "available" as const,
+            href: "/dashboard/tools/food-seo-writer",
+            badge: "NEW",
+        },
+        {
             id: "pinterest-scheduler",
             name: "Pinterest Scheduler",
             description: "Schedule your pins for optimal posting times. Automate your Pinterest workflow with smart scheduling.",
@@ -122,8 +139,15 @@ export default async function ToolsPage() {
                         }}
                     >
                         {tool.status === "available" ? (
-                            <div className="absolute top-4 right-4 text-white text-xs font-bold px-3 py-1 rounded-full" style={{ background: 'var(--accent)' }}>
-                                AVAILABLE
+                            <div className="absolute top-4 right-4 flex items-center gap-2">
+                                {(tool as any).badge && (
+                                    <span className="text-xs font-bold px-3 py-1 rounded-full" style={{ background: '#eab308', color: '#1a1a2e' }}>
+                                        {(tool as any).badge}
+                                    </span>
+                                )}
+                                <span className="text-white text-xs font-bold px-3 py-1 rounded-full" style={{ background: 'var(--accent)' }}>
+                                    AVAILABLE
+                                </span>
                             </div>
                         ) : (
                             <div className="absolute top-4 right-4 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1" style={{ background: 'var(--muted)', color: 'white' }}>

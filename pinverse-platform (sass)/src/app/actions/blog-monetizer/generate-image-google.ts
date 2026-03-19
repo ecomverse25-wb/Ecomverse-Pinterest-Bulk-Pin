@@ -5,7 +5,7 @@ import { GoogleGenAI } from "@google/genai";
 export async function generateImageWithGoogleImagen({
     prompt,
     geminiApiKey,
-    model = "imagen-3.0-generate-002",
+    model = "gemini-2.5-flash-image",
     aspectRatio = "9:16",
     imgbbApiKey,
 }: {
@@ -21,51 +21,50 @@ export async function generateImageWithGoogleImagen({
         console.log("[Imagen] Prompt length:", prompt.length);
 
         const ai = new GoogleGenAI({ apiKey: geminiApiKey });
-        const response = await ai.models.generateImages({
-            model: model,
-            prompt: prompt,
+
+        // All 3 models use generateContent with IMAGE responseModality
+        const response = await ai.models.generateContent({
+            model,
+            contents: [{
+                role: "user",
+                parts: [{
+                    text: `Generate a tall portrait image (9:16 ratio, taller than wide): ${prompt}. IMPORTANT: The image must be TALL portrait orientation, significantly taller than it is wide, like a Pinterest pin. No text, no watermarks, no people.`
+                }]
+            }],
             config: {
-                numberOfImages: 1,
-                aspectRatio: aspectRatio as "1:1" | "9:16" | "16:9" | "4:3" | "3:4",
-                safetyFilterLevel: "BLOCK_ONLY_HIGH",
-                personGeneration: "DONT_ALLOW",
+                responseModalities: ["IMAGE", "TEXT"],
             },
         });
 
-        console.log("[Imagen] Response received");
+        // Extract image from response parts
+        const parts = response.candidates?.[0]?.content?.parts ?? [];
+        for (const part of parts) {
+            if (part.inlineData?.mimeType?.startsWith("image/")) {
+                const base64 = part.inlineData.data;
+                if (!base64) continue;
 
-        const imageBytes = response.generatedImages?.[0]?.image?.imageBytes;
-        console.log("[Imagen] imageBytes present:", !!imageBytes);
-
-        if (!imageBytes) {
-            console.error("[Imagen] No imageBytes in response:", JSON.stringify(response));
-            return null;
-        }
-
-        // imageBytes is already a base64 string
-        const base64 = typeof imageBytes === "string"
-            ? imageBytes
-            : Buffer.from(imageBytes).toString("base64");
-
-        // Upload to ImgBB if key provided
-        if (imgbbApiKey) {
-            try {
-                const formData = new FormData();
-                formData.append("image", base64);
-                const res = await fetch(
-                    `https://api.imgbb.com/1/upload?key=${imgbbApiKey}`,
-                    { method: "POST", body: formData }
-                );
-                const data = await res.json();
-                if (data.data?.url) return data.data.url;
-            } catch (imgbbError) {
-                console.error("[Imagen] ImgBB upload failed:", imgbbError);
-                // Fall through to return data URL
+                // Upload to ImgBB if key provided
+                if (imgbbApiKey) {
+                    try {
+                        const formData = new FormData();
+                        formData.append("image", base64);
+                        const res = await fetch(
+                            `https://api.imgbb.com/1/upload?key=${imgbbApiKey}`,
+                            { method: "POST", body: formData }
+                        );
+                        const data = await res.json();
+                        if (data.data?.url) return data.data.url;
+                    } catch (imgbbError) {
+                        console.error("[Imagen] ImgBB upload failed:", imgbbError);
+                        // fall through to base64
+                    }
+                }
+                return `data:${part.inlineData.mimeType};base64,${base64}`;
             }
         }
 
-        // Return as data URL if no ImgBB or ImgBB failed
-        return `data:image/png;base64,${base64}`;
+        console.error("[Imagen] No image data in Gemini content response.");
+        return null;
     } catch (error: unknown) {
         console.error("[Imagen] FULL ERROR:", error);
         console.error("[Imagen] Error message:", error instanceof Error ? error.message : String(error));
@@ -87,5 +86,5 @@ function formatImagenError(msg: string): string {
     if (lower.includes("api_key_invalid") || lower.includes("invalid api key")) {
         return "⚠️ Invalid Gemini API key. Please check your key in Setup.";
     }
-    return `⚠️ Image generation failed: ${msg}`;
+    return msg; // Instead of "Image generation failed: ${msg}", let's return raw msg so user can see it
 }

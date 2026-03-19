@@ -9,10 +9,11 @@ import { generateImageWithGoogleImagen } from "./generate-image-google";
 
 function getDimensionConfig(dimensions: ImageDimensions): { width: number; height: number; ratio: string } {
     switch (dimensions) {
-        case '1024x1536': return { width: 1024, height: 1536, ratio: '2:3' };
+        case '1024x1536': return { width: 1024, height: 1536, ratio: '9:16' };
         case '1536x864': return { width: 1536, height: 864, ratio: '16:9' };
         case '1024x1024': return { width: 1024, height: 1024, ratio: '1:1' };
-        default: return { width: 1024, height: 1536, ratio: '2:3' };
+        case '1200x628': return { width: 1200, height: 628, ratio: '1.91:1' };
+        default: return { width: 1024, height: 1536, ratio: '9:16' };
     }
 }
 
@@ -23,6 +24,7 @@ function getImagenAspectRatio(dimensions: ImageDimensions): "1:1" | "9:16" | "16
         case '1024x1536': return "9:16";
         case '1536x864': return "16:9";
         case '1024x1024': return "1:1";
+        case '1200x628': return "16:9";
         default: return "9:16";
     }
 }
@@ -268,8 +270,24 @@ export async function generateFeaturedImageAction(
             }
             return { success: true, imageUrl, prompt: finalPrompt };
         } catch (error: unknown) {
-            const msg = error instanceof Error ? error.message : "Google Imagen error";
-            return { error: msg };
+            console.warn("[Imagen] Primary prompt failed, trying fallback");
+            try {
+                // Use a simpler, safer fallback prompt
+                const fallbackImageUrl = await generateImageWithGoogleImagen({
+                    prompt: `Professional lifestyle photography, ${title}, clean aesthetic, bright natural lighting, no people, Pinterest style`,
+                    geminiApiKey: geminiKey,
+                    model,
+                    aspectRatio: imagenAR,
+                    imgbbApiKey: imgbbKey || undefined,
+                });
+                if (!fallbackImageUrl) {
+                    return { error: "Google Imagen returned no image for fallback prompt." };
+                }
+                return { success: true, imageUrl: fallbackImageUrl, prompt: "Fallback: " + title };
+            } catch (fallbackError: unknown) {
+                const msg = fallbackError instanceof Error ? fallbackError.message : "Google Imagen error";
+                return { error: msg };
+            }
         }
     } else {
         // Replicate
@@ -326,14 +344,29 @@ export async function generateH2ImageAction(
             }
             return { success: true, imageUrl };
         } catch (error: unknown) {
-            const msg = error instanceof Error ? error.message : "Google Imagen section error";
-            return { error: msg };
+            console.warn("[Imagen] Primary prompt failed, trying fallback");
+            try {
+                const fallbackImageUrl = await generateImageWithGoogleImagen({
+                    prompt: `Professional lifestyle photography, ${h2Topic}, clean aesthetic, bright natural lighting, no people, Pinterest style`,
+                    geminiApiKey: geminiKey,
+                    model,
+                    aspectRatio: imagenAR,
+                    imgbbApiKey: imgbbKey || undefined,
+                });
+                if (!fallbackImageUrl) {
+                    return { error: "Google Imagen returned no image for fallback section prompt." };
+                }
+                return { success: true, imageUrl: fallbackImageUrl };
+            } catch (fallbackError: unknown) {
+                const msg = fallbackError instanceof Error ? fallbackError.message : "Google Imagen section error";
+                return { error: msg };
+            }
         }
     } else {
         // Replicate
         if (!replicateKey) return { error: "Replicate API key is missing." };
         const model = imageModel || "black-forest-labs/flux-1.1-pro";
-        const result = await generateImageViaReplicate(prompt, replicateKey, "2:3", model);
+        const result = await generateImageViaReplicate(prompt, replicateKey, "9:16", model);
         if (!result.success || !result.imageUrl) {
             return { error: result.error || "Section image generation failed." };
         }
@@ -347,5 +380,38 @@ export async function generateH2ImageAction(
         }
 
         return { success: true, imageUrl: result.imageUrl };
+    }
+}
+
+// ─── Test Image API ───
+
+export async function testImageProviderAction(
+    provider: ImageProvider,
+    model: string,
+    geminiKey: string,
+    replicateKey: string
+): Promise<{ success: boolean; imageUrl?: string; error?: string }> {
+    const prompt = "A red apple on a white table";
+
+    if (provider === "google-imagen") {
+        if (!geminiKey) return { success: false, error: "Gemini API key is required." };
+        try {
+            const imageUrl = await generateImageWithGoogleImagen({
+                prompt,
+                geminiApiKey: geminiKey,
+                model: model || "gemini-2.5-flash-image",
+                aspectRatio: "1:1"
+            });
+            if (!imageUrl) {
+                return { success: false, error: "Google Imagen returned no image." };
+            }
+            return { success: true, imageUrl };
+        } catch (error: unknown) {
+            return { success: false, error: error instanceof Error ? error.message : "Google Imagen error" };
+        }
+    } else {
+        if (!replicateKey) return { success: false, error: "Replicate API key is required." };
+        const result = await generateImageViaReplicate(prompt, replicateKey, "1:1", model);
+        return { success: result.success, imageUrl: result.imageUrl, error: result.error };
     }
 }

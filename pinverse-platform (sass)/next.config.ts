@@ -26,6 +26,16 @@ const nextConfig: NextConfig = {
 
   // Allow Turbopack (Next.js 16 default) to run without error
   turbopack: {},
+
+  images: {
+    domains: [
+      'i.ibb.co',
+      'ibb.co',
+      'img4.sellvia.com',
+      'lifestyleessentials4u.com',
+      'easycookpot.com',
+    ]
+  }
 };
 
 export default nextConfig;

@@ -1,4 +1,8 @@
 node_modules
+.next
+dist-electron
+pinverse-desktop/dist/
+pinverse-desktop/standalone/
 pinverse-desktop/release-builds-standalone/
 pinverse-desktop/release-builds-v2/
 pinverse-desktop/release-builds-v4/

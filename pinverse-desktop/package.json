@@ -1,0 +1,63 @@
+{
+    "name": "pinverse-desktop",
+    "version": "1.0.0",
+    "description": "PinVerse Desktop - Pinterest Marketing Tools (Standalone)",
+    "main": "main.js",
+    "author": "Ecomverse LLC",
+    "license": "MIT",
+    "scripts": {
+        "start": "electron .",
+        "dev": "cross-env NODE_ENV=development electron .",
+        "prebuild": "node build-desktop.js",
+        "build": "electron-builder --win",
+        "build:dir": "electron-builder --dir",
+        "build:portable": "electron-packager . PinVerse --platform=win32 --arch=x64 --overwrite --out=release-builds --extra-resource=standalone"
+    },
+    "devDependencies": {
+        "cross-env": "^7.0.3",
+        "electron": "^33.0.0",
+        "electron-builder": "^25.0.0",
+        "electron-packager": "^17.1.2",
+        "fs-extra": "^11.3.3"
+    },
+    "build": {
+        "appId": "io.pinverse.desktop",
+        "productName": "PinVerse",
+        "copyright": "Copyright © 2025 Ecomverse LLC",
+        "directories": {
+            "output": "dist",
+            "buildResources": "assets"
+        },
+        "win": {
+            "target": [
+                {
+                    "target": "nsis",
+                    "arch": [
+                        "x64"
+                    ]
+                }
+            ],
+            "icon": "assets/icon.png",
+            "publisherName": "Ecomverse LLC"
+        },
+        "nsis": {
+            "oneClick": false,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true,
+            "createStartMenuShortcut": true,
+            "shortcutName": "PinVerse"
+        },
+        "files": [
+            "main.js",
+            "preload.js",
+            "assets/**/*"
+        ],
+        "extraResources": [
+            {
+                "from": "standalone",
+                "to": "app/standalone"
+            }
+        ],
+        "asar": false
+    }
+}

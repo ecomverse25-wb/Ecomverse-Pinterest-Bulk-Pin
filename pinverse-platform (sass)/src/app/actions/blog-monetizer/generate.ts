@@ -107,6 +107,32 @@ async function generateTextWithProvider(prompt: string, config: ProviderConfig):
 
 // ─── Generate Bulk Titles (one API call) ───
 
+function sanitizeArticleTitle(title: string): string {
+    // Remove any year pattern (4 digit years 2020-2035)
+    return title.replace(/\b(202[0-9]|203[0-5])\b/g, "").trim()
+        // Clean up any double spaces left after year removal
+        .replace(/\s+/g, " ")
+        // Clean up trailing punctuation artifacts
+        .replace(/[,\s]+$/, "")
+        .trim();
+}
+
+function validateTitleNumber(title: string, h2Count: number): string {
+    // Find any number in the title
+    const numberMatch = title.match(/\b(\d+)\b/);
+    if (!numberMatch) return title; // no number, fine as-is
+
+    const titleNumber = parseInt(numberMatch[1]);
+
+    // If title number doesn't match H2 count, fix it
+    if (titleNumber !== h2Count) {
+        console.log(`[TITLE] Fixing title number: ${titleNumber} → ${h2Count} in "${title}"`);
+        return title.replace(/\b\d+\b/, h2Count.toString());
+    }
+
+    return title;
+}
+
 export async function generateBulkTitlesAction(
     keywords: string[],
     tone: Tone,
@@ -131,6 +157,30 @@ Rules:
 - Match tone: ${tone}
 - Match niche: ${niche}
 
+STRICT TITLE RULES:
+✅ DO: Start with the main keyword or a number
+✅ DO: Use power words: Best, Essential, Genius, Ultimate, Proven, Simple, Complete, Perfect, Easy, Smart
+✅ DO: Include a benefit or promise in the title
+✅ DO: Keep it 50-70 characters
+
+❌ DO NOT: Include any year numbers (2024, 2025, 2026, etc.)
+❌ DO NOT: Use the keyword alone as the full title
+❌ DO NOT: Use clickbait or exaggerated claims
+❌ DO NOT: Start with "The" every time — vary the structure
+
+GOOD title examples:
+  "7 Best Wood Kitchenware Pieces Every Home Cook Needs"
+  "Wood Kitchenware: The Complete Buyer's Guide"
+  "How to Choose Wood Kitchenware That Lasts a Lifetime"
+  "5 Reasons Wood Kitchenware Beats Plastic Every Time"
+  "Wood Kitchenware Essentials for a Better Kitchen"
+
+BAD title examples (never generate these):
+  "Wood Kitchenware" ← raw keyword only
+  "Best Wood Kitchenware in 2026" ← contains year
+  "Top Wood Kitchenware Products 2025" ← contains year
+  "Wood Kitchenware Guide 2026" ← contains year
+
 Keywords:
 ${keywordsList}
 
@@ -151,7 +201,11 @@ Return JSON array only, no markdown, no code fences:
         const text = await generateTextWithProvider(prompt, config);
         const cleaned = text.replace(/```json\s*/gi, "").replace(/```/g, "").trim();
         const parsed = JSON.parse(cleaned);
-        return { success: true, titles: parsed };
+        const sanitizedTitles = parsed.map((item: any) => ({
+            ...item,
+            title: sanitizeArticleTitle(item.title)
+        }));
+        return { success: true, titles: sanitizedTitles };
     } catch (error: unknown) {
         console.error("Bulk title generation error:", error);
         const msg = error instanceof Error ? error.message : "Unknown error";
@@ -203,15 +257,47 @@ export async function generateBlogArticleAction(
     anthropicApiKey?: string,
     openaiApiKey?: string,
     replicateApiKey?: string
-): Promise<{ success?: boolean; content?: string; metaDescription?: string; wordCount?: number; error?: string }> {
+): Promise<{ success?: boolean; content?: string; title?: string; metaDescription?: string; wordCount?: number; error?: string }> {
     const wordTarget = WORD_TARGETS[articleLength];
 
-    const prompt = `Write a complete blog article with the following specifications:
+    const prompt = `You are an expert SEO blog writer.
 
-TITLE: ${title}
-TARGET KEYWORD: ${keyword}
-NICHE: ${niche}
-TONE: ${tone}
+STEP 1 - TITLE: First, generate a compelling SEO title.
+Output it on the very first line in this exact format:
+##TITLE##Your SEO Title Here##TITLE##
+
+Title rules:
+- 50-70 characters
+- Contains keyword "${keyword}" naturally  
+- NOT just the keyword alone
+- NO years (2024/2025/2026 etc.)
+- Use formats: "X Best...", "How to...", "The Complete Guide to...", 
+  "X Reasons...", "X Ways..."
+
+CRITICAL TITLE RULE — NUMBER CONSISTENCY:
+The user has configured exactly ${h2Count} H2 sections.
+If your title includes a number, it MUST match ${h2Count}.
+
+Examples for h2Sections = ${h2Count}:
+✅ "${h2Count} Best ${keyword} Ideas to Maximize Your Home"
+✅ "${h2Count} Genius Ways to ${keyword}"
+✅ "${keyword}: ${h2Count} Expert Tips That Work"
+❌ "15 Best ${keyword}" ← WRONG number
+❌ "10 Ways to..." ← WRONG number
+
+If you use a number in the title, use EXACTLY ${h2Count}.
+If you don't want to use a number, use a non-numeric format:
+"The Complete Guide to ${keyword}"
+"How to Maximize Every Inch of Your Small Space"
+
+STEP 2 - ARTICLE: Then write the full article.
+Start the article body with <h1>Your SEO Title Here</h1>
+(use the SAME title from STEP 1)
+
+Keyword: ${keyword}
+Niche: ${niche}
+Tone: ${tone}
+Length: ${articleLength}
 WORD COUNT TARGET: ~${wordTarget} words
 NUMBER OF H2 SECTIONS: ${h2Count}
 
@@ -229,9 +315,13 @@ Rules:
 - Natural keyword density 1.5–2.5%, never forced
 
 REQUIRED STRUCTURE:
-1. Start with <h1>${title}</h1>
+1. Start with <h1>Your SEO Title Here</h1>
 2. Opening paragraph (~100 words) — engaging, immediately useful
-3. Exactly ${h2Count} H2 sections with varied engaging subheadings using <h2> tags
+3. You must write EXACTLY ${h2Count} H2 sections (not counting the FAQ H2) with varied engaging subheadings using <h2> tags.
+   No more, no less. Each H2 must be a distinct idea/tip.
+   The article introduction must NOT promise more ideas than ${h2Count}.
+   If title says "${h2Count} ideas", the intro must say "${h2Count} ideas" and there must be exactly ${h2Count} H2s.
+   Count your H2 sections before finishing. Double check.
 4. After every 2 H2 sections, insert this exact HTML comment on its own line:
    <!-- AD UNIT: Display Ad (300x250 or 728x90) -->
 5. End with an FAQ section containing 3 relevant questions in this format:
@@ -267,10 +357,37 @@ Do NOT wrap in code fences. Do NOT include <html>, <head>, or <body> tags. Just 
             text = text.replace(/META_DESCRIPTION:\s*.+/i, "").trim();
         }
 
-        // Count words
-        const wordCount = text.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length;
+        let articleTitle = keyword; // default fallback
+        let articleContent = text;
 
-        return { success: true, content: text, metaDescription, wordCount };
+        // Extract title from ##TITLE## markers
+        const titleMatch = text.match(/##TITLE##(.+?)##TITLE##/);
+        if (titleMatch) {
+            articleTitle = titleMatch[1]
+                .trim()
+                .replace(/\b(202[0-9]|203[0-5])\b/g, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            // Remove the ##TITLE## line from article content
+            articleContent = text
+                .replace(/##TITLE##.+?##TITLE##\n?/, '')
+                .trim();
+        }
+
+        // Final validation — if title === keyword, force generate one
+        if (articleTitle.toLowerCase() === keyword.toLowerCase()) {
+            articleTitle = `The Complete Guide to ${keyword}`;
+        }
+
+        // Validate title number matches H2 count
+        articleTitle = validateTitleNumber(articleTitle, h2Count);
+
+        console.log(`[TITLE] Extracted SEO title: "${articleTitle}" for keyword: "${keyword}"`);
+
+        // Count words
+        const wordCount = articleContent.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length;
+
+        return { success: true, content: articleContent, title: articleTitle, metaDescription, wordCount };
     } catch (error: unknown) {
         console.error("Article generation error:", error);
         const msg = error instanceof Error ? error.message : "Unknown error";
