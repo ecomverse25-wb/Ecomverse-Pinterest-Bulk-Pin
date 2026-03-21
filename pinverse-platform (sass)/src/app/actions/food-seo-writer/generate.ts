@@ -392,6 +392,7 @@ export async function generateFoodArticleAction(
     internalLinkTopics: string,
     affiliateLinksText: string,
     amazonAffiliateTag?: string,
+    storeProducts?: Array<{name: string, url: string, description?: string}>,
     model: string = "gemini-2.5-flash",
     writingProvider: WritingProvider = "google",
     geminiKey?: string,
@@ -488,17 +489,36 @@ IMAGE PLACEHOLDERS:
 - After each H2, insert: <!-- IMAGE: [descriptive scene] - ${keyword} [context] -->
 - Alt text must contain focus keyword or semantic variant
 
-INTERNAL LINKS (insert 2-3 total):
-- Place naturally within paragraph text
-- Format: <!-- INTERNAL LINK: {related_topic} | anchor: [anchor text] -->
-- Use topics from the internal link topics provided
-- Anchor text must be descriptive (never "click here")
+INTERNAL LINKS — STRICT RULES:
+The user has provided these internal link topics: ${internalLinkTopics}
+
+You may ONLY insert internal links for these exact topics. 
+Format each as: <a href="PLACEHOLDER_{slug}">anchor text</a>
+Where {slug} is the topic slugified (e.g. "healthy breakfast recipes" → "healthy-breakfast-recipes")
+
+DO NOT create links to:
+- Any topic not in the list above
+- Generic pages like /breakfast-ideas/, /whole-grains/, /meal-prep/
+- Any URL you invented or assumed exists
+- Any external site except authority sources already specified
+
+If no internal link topic is relevant to a paragraph, do not insert any link.
 
 AFFILIATE LINKS:
-- Insert after benefit statements, never before
+${(affiliateLinksText || amazonAffiliateTag) ? `- Insert after benefit statements, never before
 - Max 1 per H2 section
 - Format: <a href="https://www.amazon.com/s?k=PRODUCT_NAME_URL_ENCODED${amazonAffiliateTag ? `&tag=${amazonAffiliateTag}` : ''}">Product Name</a>
-- Replace PRODUCT_NAME_URL_ENCODED with the URL-encoded product name you recommend.
+- Replace PRODUCT_NAME_URL_ENCODED with a STRICTLY URL-encoded search term. Strip any cooking verbs or adjectives first (e.g. "heavy-duty baking pan" -> "baking+pan", "best blender for smoothies" -> "blender"). Encode spaces as '+'.` : `- Do NOT generate any amazon URLs.`}
+
+${(storeProducts && storeProducts.length > 0) ? `STORE PRODUCTS CATALOG:
+${storeProducts.map(p => `- Product: ${p.name} | URL: ${p.url}${p.description ? ` | Note: ${p.description}` : ''}`).join('\n')}
+
+STORE PRODUCT INSERTION RULES:
+- IMPORTANT: Review the STORE PRODUCTS CATALOG above.
+- In EACH H2 section, contextually recommend ONE relevant item from the catalog.
+- Format strictly as: <!-- STORE_LINK: {Product Name} | url: {url} --> embedded naturally in a sentence.
+- Example: "For the perfect crust, we recommend using a <!-- STORE_LINK: Cast Iron Skillet | url: https://yourstore.com/skillet --> to get that even bake."
+- Prioritize natural, helpful recommendations over sales pitches. Do NOT recommend the same product in every section.` : ''}
 
 EXTERNAL LINK (insert exactly 1):
 - Place in the final third of the article
@@ -682,8 +702,7 @@ Do NOT wrap in code fences. Do NOT include <html>, <head>, or <body> tags.`;
 
         console.log(`[FOOD-SEO] Extracted title: "${articleTitle}" for keyword: "${keyword}"`);
 
-        // Process Internal Links
-        articleContent = processInternalLinks(articleContent);
+        // Internal Links & Store Links are now processed during publishing to ensure access to wpUrl
 
         // Count words
         const wordCount = articleContent.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length;
@@ -710,57 +729,50 @@ Do NOT wrap in code fences. Do NOT include <html>, <head>, or <body> tags.`;
 
 // ─── Post-Processing & Publishing ───
 
-function processInternalLinks(html: string): string {
-    const paragraphs = html.split(/(<\/p>|<p[^>]*>)/i);
-    let modifiedHtml = "";
-    const placeholders: { topic: string; anchor: string }[] = [];
+function stripMetadataBlocks(content: string): string {
+    // Remove entire [PIN_TITLE]...[/PIN_TITLE] style blocks
+    content = content.replace(/\[PIN_TITLE\][\s\S]*?(?=\[PIN_DESCRIPTION\]|\[META_DESCRIPTION\]|\[TAGS\]|<h[12]|$)/gi, "");
+    content = content.replace(/\[PIN_DESCRIPTION\][\s\S]*?(?=\[META_DESCRIPTION\]|\[TAGS\]|<h[12]|$)/gi, "");
+    content = content.replace(/\[META_DESCRIPTION\][\s\S]*?(?=\[TAGS\]|<h[12]|$)/gi, "");
+    content = content.replace(/\[TAGS\][\s\S]*?(?=<h[12]|$)/gi, "");
+    
+    // Also remove any remaining standalone bracket labels
+    content = content.replace(/\[(PIN_TITLE|PIN_DESCRIPTION|META_DESCRIPTION|TAGS)\]/gi, "");
+    
+    return content.trim();
+}
 
-    // Extract all <!-- INTERNAL LINK: topic | anchor: text --> and remove them
-    const linkRegex = /<!--\s*INTERNAL LINK:\s*([^|]+)\|\s*anchor:\s*([^>]+)-->/gi;
-    let match;
-    let tempHtml = html;
-    while ((match = linkRegex.exec(tempHtml)) !== null) {
-        placeholders.push({ topic: match[1].trim(), anchor: match[2].trim() });
-    }
-    tempHtml = tempHtml.replace(linkRegex, "");
+function removeDuplicateTitle(content: string, title: string): string {
+    const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    
+    // Remove any h1 or h2 containing the title at the START of content
+    content = content.replace(
+        new RegExp(`^\\s*<h[12][^>]*>\\s*${escapedTitle}\\s*</h[12]>\\s*`, "i"),
+        ""
+    );
+    
+    // Also remove if it appears as plain text heading at the very start
+    content = content.replace(
+        new RegExp(`^\\s*${escapedTitle}\\s*\\n`, "i"),
+        ""
+    );
+    
+    return content.trim();
+}
 
-    // Process paragraphs
-    const pTokens = tempHtml.split(/(<p[^>]*>[\s\S]*?<\/p>)/gi);
-    for (let i = 0; i < pTokens.length; i++) {
-        let token = pTokens[i];
-        if (token.toLowerCase().startsWith("<p")) {
-            for (let j = 0; j < placeholders.length; j++) {
-                const link = placeholders[j];
-                const parts = link.anchor.toLowerCase().split(/\s+/);
-                // Check if paragraph contains some words from anchor text
-                if (parts.some(p => p.length > 3 && token.toLowerCase().includes(p))) {
-                    const slug = link.topic.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-                    token = token.replace(/<\/p>/i, ` For more ideas, explore our <a href="/${slug}/">${link.anchor}</a>.</p>`);
-                    placeholders.splice(j, 1);
-                    j--;
-                    break; // Only one link per paragraph
-                }
-            }
-        }
-        modifiedHtml += token;
-    }
+function processStoreLinks(html: string): string {
+    const linkRegex = /<!--\s*STORE_LINK:\s*([^|]+)\|\s*url:\s*([^>]+)-->/gi;
+    return html.replace(linkRegex, (match, productName, url) => {
+        return `<a href="${url.trim()}" target="_blank" rel="noopener">${productName.trim()}</a>`;
+    });
+}
 
-    // Append remaining back before FAQ
-    if (placeholders.length > 0) {
-        let leftoverHtml = "";
-        for (const link of placeholders) {
-            const slug = link.topic.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-            leftoverHtml += `<p>For more ideas, explore our <a href="/${slug}/">${link.anchor}</a>.</p>\n`;
-        }
-        const faqRegex = /<h2[^>]*>.*frequently asked questions.*<\/h2>/i;
-        if (faqRegex.test(modifiedHtml)) {
-            modifiedHtml = modifiedHtml.replace(faqRegex, (m) => leftoverHtml + m);
-        } else {
-            modifiedHtml += leftoverHtml;
-        }
-    }
-
-    return modifiedHtml;
+function processInternalLinks(html: string, wpUrl: string): string {
+    return html.replace(/PLACEHOLDER_([^"'>\s]+)/gi, (match, topic) => {
+        // Build URL from the user's WP site base URL + topic slug
+        const topicUrl = `${wpUrl.replace(/\/$/, "")}/${topic.toLowerCase().replace(/\s+/g, "-")}/`;
+        return topicUrl;
+    });
 }
 
 function convertHtmlToGutenberg(html: string): string {
@@ -786,10 +798,13 @@ function convertHtmlToGutenberg(html: string): string {
       '<!-- wp:heading {"level":3} -->\n<h3$1>$2</h3>\n<!-- /wp:heading -->')
     .replace(/<ul([\s\S]*?)>([\s\S]*?)<\/ul>/gi,
       '<!-- wp:list -->\n<ul$1>$2</ul>\n<!-- /wp:list -->')
+    // FIX 7: Prevent duplicate headings by generating proper wp:image JSON attributes and removing extraneous <p> tags on figures.
+    .replace(/<figure[^>]*>([\s\S]*?)<img([^>]*)alt="([^"]*)"([^>]*)>([\s\S]*?)<\/figure>/gi,
+      (_, p1, p2, alt, p4, p5) => {
+          return `<!-- wp:image {"alt":"${alt}"} -->\n<figure class="wp-block-image"><img${p2}alt="${alt}"${p4} /></figure>\n<!-- /wp:image -->`;
+      })
     .replace(/<p([\s\S]*?)>([\s\S]*?)<\/p>/gi,
-      '<!-- wp:paragraph -->\n<p$1>$2</p>\n<!-- /wp:paragraph -->')
-    .replace(/<figure[^>]*>([\s\S]*?)<img([^>]+)>([\s\S]*?)<\/figure>/gi,
-      '<!-- wp:image -->\n<figure class="wp-block-image"><img$2 /></figure>\n<!-- /wp:image -->');
+      '<!-- wp:paragraph -->\n<p$1>$2</p>\n<!-- /wp:paragraph -->');
 
   // Step 3: Restore preserved comments as HTML blocks
   result = result.replace(/%%COMMENT_(\d+)%%/g, (_, idx) => {
@@ -803,19 +818,24 @@ export async function publishFoodArticleToWPAction(
     article: FoodArticle,
     wpUrl: string,
     wpUser: string,
-    wpPassword: string
+    wpPassword: string,
+    niche: string,
+    publishMode: 'draft' | 'publish' = 'publish'
 ): Promise<{ success?: boolean; id?: number; link?: string; error?: string }> {
     try {
         const baseUrl = wpUrl.replace(/\/$/, "");
         const authHeader = "Basic " + Buffer.from(`${wpUser}:${wpPassword}`).toString("base64");
 
-        // FIX 6: Strip duplicate H1/H2 titles from start
-        const escapeRegex = (s: string) => s.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
-        const titleRegex = new RegExp(`^\\s*<h[12][^>]*>${escapeRegex(article.title)}<\\/h[12]>\\s*`, 'i');
-        let finalContent = article.content.replace(titleRegex, '');
+        let finalContent = article.content;
+        finalContent = stripMetadataBlocks(finalContent);        // Step 1 — remove all metadata labels
+        finalContent = removeDuplicateTitle(finalContent, article.title); // Step 2 — remove duplicate h1/h2
+        finalContent = processInternalLinks(finalContent, wpUrl);   // Step 3 — insert internal links (user topics only)
+        finalContent = processStoreLinks(finalContent);      // Step 4 — insert store product links
         
-        // FIX 5: Convert HTML to Gutenberg
-        finalContent = convertHtmlToGutenberg(finalContent);
+        // Clean up dangling prepositions after link strip logic (from BlogMonetizer logic if present)
+        finalContent = finalContent.replace(/\s+(a|an|the|our|your|this)\s+(?=to\b|for\b|\.|\,)/gi, '');
+        
+        finalContent = convertHtmlToGutenberg(finalContent);      // Step 5 — convert to blocks
 
         // Upload featured image first if it exists
         let featuredMediaId: number | undefined;
@@ -862,37 +882,57 @@ export async function publishFoodArticleToWPAction(
             }
         }
 
-        // FIX 1: Fetch or create category
-        let categoryIds: number[] | undefined;
+        // FIX 2: Create or retrieve Category matching the Niche
+        let categoryId: number | undefined;
         try {
-            // Search using the full keyword for best match
-            const catRes = await fetch(
-                `${baseUrl}/wp-json/wp/v2/categories?search=${encodeURIComponent(article.keyword)}&per_page=10`,
-                { headers: { "Authorization": authHeader } }
-            );
+            const categoryName = niche ? niche.trim() : "Food and Drink";
+            const categorySlug = categoryName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+            console.log(`[FOOD-SEO] Resolving Category — name: "${categoryName}", slug: "${categorySlug}"`);
+
+            // Step 1: Check if it exists by slug
+            const catRes = await fetch(`${baseUrl}/wp-json/wp/v2/categories?slug=${categorySlug}`, {
+                headers: { "Authorization": authHeader }
+            });
             const cats = await catRes.json();
-
-            // Filter out Uncategorized (id=1) — NEVER fall back to it
-            const validCats = Array.isArray(cats) ? cats.filter((c: any) => c.id !== 1) : [];
-
-            if (validCats.length > 0) {
-                categoryIds = [validCats[0].id];
+            
+            if (cats && cats.length > 0) {
+                categoryId = cats[0].id;
+                console.log(`[FOOD-SEO] Found existing category ID: ${categoryId}`);
             } else {
-                // No match found — create a proper category from the keyword
-                // Use last 2-3 meaningful words (skip numbers and short words)
-                const words = article.keyword.split(' ').filter(w => w.length > 3 && !/^\d+$/.test(w));
-                const catName = words.slice(0, 3).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+                // Step 2: Create new category
+                console.log(`[FOOD-SEO] Category not found. Creating new category...`);
                 const createCat = await fetch(`${baseUrl}/wp-json/wp/v2/categories`, {
                     method: "POST",
                     headers: { "Authorization": authHeader, "Content-Type": "application/json" },
-                    body: JSON.stringify({ name: catName })
+                    body: JSON.stringify({ name: categoryName, slug: categorySlug })
                 });
+
                 if (createCat.ok) {
                     const newCat = await createCat.json();
-                    if (newCat.id && newCat.id !== 1) categoryIds = [newCat.id];
+                    categoryId = newCat.id;
+                    console.log(`[FOOD-SEO] Created new category ID: ${categoryId}`);
+                } else {
+                    // Step 3: Conflict fallback (probably exists as a Tag)
+                    console.warn(`[FOOD-SEO] Category creation failed (likely slug conflict with tag). Creating with -hub slug...`);
+                    const fallbackCreate = await fetch(`${baseUrl}/wp-json/wp/v2/categories`, {
+                        method: "POST",
+                        headers: { "Authorization": authHeader, "Content-Type": "application/json" },
+                        body: JSON.stringify({ name: categoryName, slug: categorySlug + '-hub' })
+                    });
+                    if (fallbackCreate.ok) {
+                        const fallbackCat = await fallbackCreate.json();
+                        categoryId = fallbackCat.id;
+                        console.log(`[FOOD-SEO] Created fallback category ID: ${categoryId}`);
+                    }
                 }
             }
-        } catch (e) { console.error("Category lookup failed", e); }
+        } catch (e) {
+            console.error("[FOOD-SEO] Error resolving category:", e);
+        }
+
+        if (!categoryId) {
+            console.error(`[FOOD-SEO] CRITICAL: Failed to resolve or create category. Post will be Uncategorized.`);
+        }
 
         // FIX 4: Fetch or create tags
         const tagIds: number[] = [];
@@ -921,26 +961,58 @@ export async function publishFoodArticleToWPAction(
             }
         }
 
+        // FIX 3: Shorten Custom SEO Title (SEO title < 60 chars)
+        // Try extracting a short benefit from the first sentence or H1
+        const words = article.content.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean);
+        const benefitAttempt = words.slice(10, 18).join(' '); // Rough heuristic to grab some early action words
+        let seoTitle = `${article.keyword} — ${benefitAttempt} | Source Recipes`;
+        if (seoTitle.length > 60) {
+            // Truncate the benefit portion
+            const allowedBenefitLen = 60 - (`${article.keyword} —  | Source Recipes`.length);
+            const shortB = benefitAttempt.substring(0, Math.max(0, allowedBenefitLen)).trim();
+            seoTitle = shortB ? `${article.keyword} — ${shortB} | Source Recipes` : `${article.keyword} | Source Recipes`;
+        }
+        
+        // FIX 4: Generate Slug from Focus Keyword — ALWAYS max 4 words
+        const rawSlug = article.keyword
+            .toLowerCase()
+            .replace(/[^a-z0-9\s-]/g, "")
+            .trim()
+            .replace(/\s+/g, "-");
+        const generatedSlug = rawSlug.split("-").slice(0, 4).join("-");
+        // e.g. "healthy chicken dinner recipes" → "healthy-chicken-dinner-recipes"
+
+        // FIX 3: Explicitly resolve publish status — never rely on fallback or || operator
+        // Force to string comparison to guard against undefined/null/empty string coming from settings
+        const resolvedStatus: 'draft' | 'publish' = (String(publishMode).trim() === 'draft') ? 'draft' : 'publish';
+        console.log(`[FOOD-SEO] publishMode param received: "${publishMode}" (type: ${typeof publishMode}) → resolvedStatus: "${resolvedStatus}"`);
+
         // Prepare POST body
         const postData: Record<string, unknown> = {
             title: article.title,
             content: finalContent,
-            status: "draft",
-            categories: categoryIds,
+            status: resolvedStatus,
+            slug: generatedSlug,
+            categories: categoryId ? [categoryId] : undefined,
             tags: tagIds.length > 0 ? tagIds : undefined,
-            excerpt: article.metaDescription, // FIX 3
             meta: {
-                // FIX 2: Rank Math meta fields
+                // FIX 1: Rank Math meta fields
                 rank_math_focus_keyword: article.keyword,
-                rank_math_title: article.title,
+                rank_math_title: seoTitle,
                 rank_math_description: article.metaDescription,
                 rank_math_facebook_title: article.title,
                 rank_math_facebook_description: article.metaDescription,
-                rank_math_twitter_use_facebook: "on"
+                rank_math_twitter_use_facebook: "on",
+                // Pinterest meta
+                pin_title: article.pinTitle || "",
+                pin_description: article.pinDescription || "",
             }
         };
 
         if (featuredMediaId) postData.featured_media = featuredMediaId;
+
+        // FIX 1: Debug log — print full postData before sending to WP
+        console.error(`[FOOD-SEO] Full postData being sent to WordPress:\n${JSON.stringify(postData, null, 2)}`);
 
         const response = await fetch(`${baseUrl}/wp-json/wp/v2/posts`, {
             method: "POST",
@@ -957,6 +1029,68 @@ export async function publishFoodArticleToWPAction(
         }
 
         const data = await response.json();
+
+        // FIX 1 — Rank Math Focus Keyword & publishMode persistence
+        // RankMath endpoint to update meta MUST be sent to Rank Math's updateMeta route.
+        // We also resend the status to ensure any PATCH doesn't revert to draft mistakenly.
+
+        if (data.id) {
+            // Strategy 1: Rank Math's dedicated REST endpoint (Most reliable if RM is active)
+            try {
+                const rankMathRes = await fetch(`${baseUrl}/wp-json/rankmath/v1/updateMeta`, {
+                    method: "POST",
+                    headers: {
+                        "Authorization": authHeader,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        objectID: data.id,
+                        objectType: "post",
+                        meta: {
+                            rank_math_focus_keyword: article.keyword,
+                            rank_math_title: seoTitle,
+                            rank_math_description: article.metaDescription,
+                        }
+                    }),
+                });
+                if (rankMathRes.ok) {
+                    console.log(`[FOOD-SEO] Rank Math updateMeta API succeeded for post ${data.id}`);
+                } else {
+                    const rmErr = await rankMathRes.text().catch(() => '');
+                    console.warn(`[FOOD-SEO] Rank Math updateMeta failed (${rankMathRes.status}): ${rmErr}`);
+                }
+            } catch (rmError) {
+                console.warn(`[FOOD-SEO] Rank Math updateMeta network error:`, rmError);
+            }
+
+            // Strategy 2: Standard WP REST API PATCH to post meta (with status to prevent reverting)
+            try {
+                const metaPatchRes = await fetch(`${baseUrl}/wp-json/wp/v2/posts/${data.id}`, {
+                    method: "POST", // POST to /wp/v2/posts/:id updates the post
+                    headers: {
+                        "Authorization": authHeader,
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({
+                        status: resolvedStatus, // STRICT: ALWAYS RE-APPLY STATUS IN ANY PATCH
+                        meta: {
+                            rank_math_focus_keyword: article.keyword,
+                            rank_math_title: seoTitle,
+                            rank_math_description: article.metaDescription,
+                        }
+                    }),
+                });
+                if (metaPatchRes.ok) {
+                    console.log(`[FOOD-SEO] Post meta PATCH successful for post ${data.id}`);
+                } else {
+                    const patchErr = await metaPatchRes.text().catch(() => '');
+                    console.warn(`[FOOD-SEO] Post meta PATCH failed (${metaPatchRes.status}): ${patchErr}`);
+                }
+            } catch (patchError) {
+                console.warn(`[FOOD-SEO] Post meta PATCH network error:`, patchError);
+            }
+        }
+
         return { success: true, id: data.id, link: data.link };
     } catch (error: unknown) {
         console.error("Publishing Food Article error:", error);

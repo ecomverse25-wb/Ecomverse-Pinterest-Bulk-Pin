@@ -100,6 +100,8 @@ export const DEFAULT_FOOD_SEO_SETTINGS: FoodSeoSettings = {
         colorMood: '',
         dimensions: '1200x628',
     },
+    publishMode: 'publish',
+    storeProducts: [],
 };
 
 // ─── Strategy → Auto-set mappings ───

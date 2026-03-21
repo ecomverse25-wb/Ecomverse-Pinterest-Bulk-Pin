@@ -92,6 +92,8 @@ export interface FoodSeoSettings {
         dimensions: import("@/components/blog-monetizer/BlogMonetizer.types").ImageDimensions;
     };
     amazonAffiliateTag?: string;
+    publishMode: 'draft' | 'publish';
+    storeProducts: Array<{ name: string; url: string; description?: string }>;
 }
 
 // ─── Article Interface ───

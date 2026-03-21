@@ -382,6 +382,15 @@ export default function SetupTab(props: SetupTabProps) {
                             {FAQ_COUNT_OPTIONS.map(o => <option key={o} value={o}>{o} questions</option>)}
                         </select>
                     </div>
+
+                    {/* Publish Mode */}
+                    <div>
+                        <label style={labelStyle}>Publishing Mode</label>
+                        <select value={settings.publishMode} onChange={e => updateSettings({ publishMode: e.target.value as 'draft' | 'publish' })} style={selectStyle}>
+                            <option value="publish">Publish Immediately</option>
+                            <option value="draft">Save as Draft</option>
+                        </select>
+                    </div>
                 </div>
 
                 {/* ── AI Strategy Preview ── */}
@@ -583,20 +592,53 @@ export default function SetupTab(props: SetupTabProps) {
                     <label style={labelStyle}>Amazon Affiliate Tag (optional)</label>
                     <input type="text" value={settings.amazonAffiliateTag || ''}
                         onChange={e => updateSettings({ amazonAffiliateTag: e.target.value })}
-                        placeholder="e.g. myfoodblog-20"
+                        placeholder="e.g. yourtag-20 — leave blank to skip product links"
                         style={inputStyle} />
                     <p style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>
-                        Appended to generated Amazon search URLs for affiliate marketing
+                        If left blank, product mentions will appear as plain bold text without links.
                     </p>
                 </div>
 
                 {/* Affiliate Links */}
-                <div>
+                <div style={{ marginBottom: 16 }}>
                     <label style={labelStyle}>Affiliate Links (one per line: ProductName | URL)</label>
                     <textarea rows={4} value={affiliatesText}
                         onChange={e => setAffiliatesText(e.target.value)}
                         placeholder={"Best Air Fryer | https://amazon.com/dp/...\nKitchenAid Mixer | https://amazon.com/dp/..."}
                         style={{ ...inputStyle, resize: "vertical" }} />
+                </div>
+
+                {/* Store Product Links (New Feature) */}
+                <div>
+                    <label style={labelStyle}>🛒 Store Product Links File (optional)</label>
+                    <input type="file" accept=".csv,.txt"
+                        onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = (ev) => {
+                                const text = ev.target?.result as string;
+                                const products = text.split("\n")
+                                    .map(line => line.trim())
+                                    .filter(line => line.includes("|"))
+                                    .map(line => {
+                                      const parts = line.split("|").map(p => p.trim());
+                                      return { name: parts[0] || "", url: parts[1] || "", description: parts[2] || "" };
+                                    })
+                                    .filter(p => p.name && p.url);
+                                updateSettings({ storeProducts: products });
+                            };
+                            reader.readAsText(file);
+                        }}
+                        style={{ ...inputStyle, cursor: "pointer", padding: "6px" }} />
+                    <p style={{ color: "#64748b", fontSize: 12, marginTop: 4 }}>
+                        Upload a file with your store's products. Format: ProductName | URL (one per line). AI will automatically match and insert the most relevant product into each recipe section.
+                    </p>
+                    {settings.storeProducts && settings.storeProducts.length > 0 && (
+                        <p style={{ color: "#10b981", fontSize: 13, marginTop: 8, fontWeight: 600 }}>
+                            ✅ {settings.storeProducts.length} products loaded — AI will match them to your content
+                        </p>
+                    )}
                 </div>
             </div>
 

@@ -102,6 +102,7 @@ export function useArticleGeneration({
                     settings.authoritySource, settings.faqCount,
                     settings.internalLinkTopics, affiliateLinksText,
                     settings.amazonAffiliateTag,
+                    settings.storeProducts,
                     writingModel, writingProvider,
                     geminiKey, anthropicKey, openaiKey, replicateKey
                 );
@@ -294,11 +295,14 @@ export function useArticleGeneration({
     const publishAllToWP = useCallback(async () => {
         if (!wpUrl || !wpUser || !wpPassword) { alert("WordPress credentials required."); return; }
         const readyArticles = articles.filter(a => a.status === "ready");
+        console.log(`[FOOD-SEO] publishAllToWP called — publishMode: "${settings.publishMode}", niche: "${settings.niche}", articles: ${readyArticles.length}`);
         for (let i = 0; i < readyArticles.length; i++) {
             setStatusMessage(`📤 Publishing... ${i + 1}/${readyArticles.length}`);
             const art = readyArticles[i];
             try {
-                const result = await publishFoodArticleToWPAction(art, wpUrl, wpUser, wpPassword);
+                const pubMode = settings.publishMode || 'publish';
+                console.log(`[FOOD-SEO] Calling publishFoodArticleToWPAction with publishMode="${pubMode}", niche="${settings.niche}"`);
+                const result = await publishFoodArticleToWPAction(art, wpUrl, wpUser, wpPassword, settings.niche, pubMode);
                 if (result.success) {
                     const idx = articles.indexOf(art);
                     if (idx !== -1) updateArticle(idx, { ...art, status: "published", wpLink: result.link, wpPostId: result.id });
@@ -313,7 +317,7 @@ export function useArticleGeneration({
             await new Promise(r => setTimeout(r, 1000));
         }
         if (readyArticles.length > 0) setStatusMessage("✅ Publishing process finished!");
-    }, [articles, wpUrl, wpUser, wpPassword, setStatusMessage, updateArticle]);
+    }, [articles, wpUrl, wpUser, wpPassword, settings.publishMode, settings.niche, setStatusMessage, updateArticle]);
 
     const exportTitlesCSV = useCallback((items: { keyword: string; title: string }[]) => {
         const csv = "keyword,title\n" + items.map(r => `"${r.keyword}","${r.title}"`).join("\n");
