@@ -1,543 +1,536 @@
-// v1.0
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import type {
-    FoodSeoSettings, ParsedKeyword, FeaturedImageSettings,
-    AffiliateLink, WritingProvider, ImageProvider, ImageStyle, ImageDimensions,
-    FoodTone, FoodH2Count, TitleFormula, BatchQueueItem, KeywordAnalysis,
-} from "./types";
-import { RANK_MATH_WEIGHTS } from "./constants";
-import { DEFAULT_WRITING_MODELS, DEFAULT_IMAGE_MODELS } from "./types";
-import { DEFAULT_FOOD_SEO_SETTINGS } from "./constants";
-import {
-    generateFoodBulkTitlesAction, generateFoodSingleTitleAction,
-    analyzeKeywordAction,
-} from "@/app/actions/food-seo-writer/generate";
-import { testImageProviderAction } from "@/app/actions/blog-monetizer/generate-image";
-import { getUserSettingsAction, updateUserSettingsAction } from "@/app/actions/user-settings-actions";
-import { useArticleGeneration } from "./hooks/useArticleGeneration";
-import { usePinGeneration } from "./hooks/usePinGeneration";
-import SetupTab from "./tabs/SetupTab";
-import ContentStudioTab from "./tabs/ContentStudioTab";
-import PinterestPinsTab from "./tabs/PinterestPinsTab";
+import { useState, useCallback, useEffect } from "react";
+import type { FormInputs, ProviderSettings, ContentProvider, ImageProvider } from "./types";
+import { DEFAULT_FORM_INPUTS, CONTENT_MODELS, IMAGE_MODELS } from "./lib/constants";
+import { useBatchProcessing } from "./hooks/useBatchProcessing";
+import InputForm from "./InputForm";
+import ProgressIndicator from "./ProgressIndicator";
+import SeasonalSuggestionBanner from "./SeasonalSuggestion";
+import OutputTabs from "./OutputTabs";
+import ExportButtons from "./ExportButtons";
+import BatchProgress from "./BatchProgress";
 
-// ─── localStorage helpers ───
-function loadLS<T>(key: string, fallback: T): T {
-    if (typeof window === "undefined") return fallback;
-    try {
-        const v = localStorage.getItem(`fsw_${key}`);
-        return v ? JSON.parse(v) : fallback;
-    } catch { return fallback; }
-}
-function saveLS(key: string, value: unknown) {
-    if (typeof window === "undefined") return;
-    localStorage.setItem(`fsw_${key}`, JSON.stringify(value));
-}
+// ─── Local Storage Key ───
+const STORAGE_KEY = "food-seo-writer-v2-settings";
 
-// ─── File parsers ───
-async function parseTxtFile(text: string): Promise<string[]> {
-    return text.split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("#"));
-}
-async function parseCsvFile(text: string): Promise<string[]> {
-    const Papa = (await import("papaparse")).default;
-    const result = Papa.parse(text, { header: true, skipEmptyLines: true });
-    const headers = result.meta.fields || [];
-    const kwHeaders = ["keyword", "keywords", "key word", "target keyword", "query", "term"];
-    const kwCol = headers.find(h => kwHeaders.includes(h.toLowerCase())) || headers[0];
-    if (!kwCol) return [];
-    return (result.data as Record<string, string>[])
-        .map(row => (row[kwCol] || "").trim())
-        .filter(Boolean);
-}
-async function parseXlsxFile(buffer: ArrayBuffer): Promise<string[]> {
-    const XLSX = (await import("xlsx")).default;
-    const wb = XLSX.read(buffer, { type: "array" });
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const data: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
-    if (data.length === 0) return [];
-    const headerRow = data[0].map(h => String(h || "").toLowerCase().trim());
-    const kwHeaders = ["keyword", "keywords", "key word", "target keyword", "query", "term"];
-    let colIdx = headerRow.findIndex(h => kwHeaders.includes(h));
-    if (colIdx === -1) colIdx = 0;
-    return data.slice(1).map(row => String(row[colIdx] || "").trim()).filter(Boolean);
-}
+const DEFAULT_PROVIDER: ProviderSettings = {
+  contentProvider: "gemini",
+  contentModel: "gemini-2.5-flash",
+  contentApiKey: "",
+  imageProvider: "gemini",
+  imageModel: "nano-banana-pro-preview",
+  imageApiKey: "",
+  useSharedKey: true,
+};
+
+// ─── Inline Styles ───
+const containerStyle: React.CSSProperties = {
+  maxWidth: 1100,
+  margin: "0 auto",
+  padding: "16px 20px",
+  fontFamily: "'Inter', -apple-system, sans-serif",
+};
+
+const headerStyle: React.CSSProperties = {
+  marginBottom: 24,
+};
+
+const providerCardStyle: React.CSSProperties = {
+  background: "#1a2035",
+  border: "1px solid #334155",
+  borderRadius: 12,
+  padding: 16,
+  marginBottom: 16,
+};
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "10px 14px",
+  background: "#0f1623",
+  border: "1px solid #334155",
+  borderRadius: 8,
+  color: "#e2e8f0",
+  fontSize: 14,
+  outline: "none",
+};
+
+const selectStyle: React.CSSProperties = {
+  ...inputStyle,
+  cursor: "pointer",
+};
+
+const labelStyle: React.CSSProperties = {
+  display: "block",
+  fontSize: 13,
+  fontWeight: 600,
+  color: "#94a3b8",
+  marginBottom: 6,
+};
 
 // ─── Main Component ───
+
 export default function FoodSeoWriter() {
-    // Tab
-    const [activeTab, setActiveTab] = useState<"setup" | "studio" | "pins">("setup");
+  // Form state
+  const [inputs, setInputs] = useState<FormInputs>(DEFAULT_FORM_INPUTS);
+  const [provider, setProvider] = useState<ProviderSettings>(DEFAULT_PROVIDER);
+  const [keywordError, setKeywordError] = useState<string>("");
 
-    // Settings
-    const [settings, setSettings] = useState<FoodSeoSettings>(() => loadLS("settings", DEFAULT_FOOD_SEO_SETTINGS));
-    const [geminiKey, setGeminiKey] = useState("");
-    const [replicateKey, setReplicateKey] = useState("");
-    const [anthropicKey, setAnthropicKey] = useState("");
-    const [openaiKey, setOpenaiKey] = useState("");
-    const [imgbbKey, setImgbbKey] = useState("");
+  // Pipeline via Batch Processing (handles both single & batch)
+  const {
+    batchItems,
+    setBatchItems,
+    isBatchProcessing,
+    currentBatchIndex,
+    startBatch,
+    stopBatch,
+    internalGeneration: {
+      progress,
+      result,
+      generating,
+      fixing,
+      generate,
+      fixIssues,
+      reset,
+      abort,
+    }
+  } = useBatchProcessing();
 
-    // Keyword Analysis (AI Strategy)
-    const [keywordAnalysis, setKeywordAnalysis] = useState<KeywordAnalysis | null>(null);
-    const [analysisLoading, setAnalysisLoading] = useState(false);
-    const analysisDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Extra States for Multi-Provider
+  const [savedKeys, setSavedKeys] = useState<Record<string, boolean>>({});
+  const [testingImage, setTestingImage] = useState(false);
+  const [testImageResult, setTestImageResult] = useState<"success" | "error" | null>(null);
 
-    // Provider & Model
-    const [writingProvider, setWritingProvider] = useState<WritingProvider>("google");
-    const [writingModel, setWritingModel] = useState("gemini-2.5-flash");
-    const [imageProvider, setImageProvider] = useState<ImageProvider>("google-imagen");
-    const [imageModel, setImageModel] = useState("gemini-2.5-flash-image");
-
-    // WP
-    const [wpUrl, setWpUrl] = useState(() => loadLS("wp_url", ""));
-    const [wpUser, setWpUser] = useState(() => loadLS("wp_user", ""));
-    const [wpPassword, setWpPassword] = useState(() => loadLS("wp_password", ""));
-
-    // Keywords
-    const [keywordMode, setKeywordMode] = useState<"single" | "file">("single");
-    const [singleKeyword, setSingleKeyword] = useState("");
-    const [parsedKeywords, setParsedKeywords] = useState<ParsedKeyword[]>([]);
-    const [titlesGenerated, setTitlesGenerated] = useState(false);
-
-    // Status
-    const [statusMessage, setStatusMessage] = useState("");
-    const [titleGenerating, setTitleGenerating] = useState(false);
-
-    // Batch Queue
-    const [batchQueue, setBatchQueue] = useState<BatchQueueItem[]>([]);
-
-    // Image settings
-    const [imageSettingsOpen, setImageSettingsOpen] = useState(false);
-    const [testImageResult, setTestImageResult] = useState<{ status: 'idle' | 'testing' | 'success' | 'error'; url?: string; error?: string }>({ status: 'idle' });
-
-    // Affiliates
-    const [affiliatesText, setAffiliatesText] = useState(() => {
-        const links = loadLS<AffiliateLink[]>("affiliateLinks", []);
-        return links.map(a => `${a.productName} | ${a.url}`).join("\n");
-    });
-
-    // ─── Session Cache ───
-    const SESSION_VERSION = "v1";
-    useEffect(() => {
-        const savedVersion = loadLS<string>("session_version", "");
-        if (savedVersion !== SESSION_VERSION) {
-            localStorage.removeItem("fsw_articles");
-            saveLS("session_version", SESSION_VERSION);
+  // Load settings from localStorage
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.inputs) setInputs((prev) => ({ ...prev, ...parsed.inputs }));
+        if (parsed.provider) {
+          // Merge core provider settings, but overwrite API keys with specific key storage
+          const p = { ...DEFAULT_PROVIDER, ...parsed.provider } as ProviderSettings;
+          const contentKey = localStorage.getItem(`pinverse_content_api_key_${p.contentProvider}`);
+          if (contentKey) p.contentApiKey = contentKey;
+          const imageKey = localStorage.getItem(`pinverse_image_api_key_${p.imageProvider}`);
+          if (imageKey) p.imageApiKey = imageKey;
+          setProvider(p);
         }
-    }, []);
-
-    // ─── Load API Keys from DB ───
-    useEffect(() => {
-        (async () => {
-            const { settings: s } = await getUserSettingsAction();
-            if (s) {
-                if (s.gemini_api_key) setGeminiKey(s.gemini_api_key);
-                if (s.replicate_api_key) setReplicateKey(s.replicate_api_key);
-                if (s.anthropic_api_key) setAnthropicKey(s.anthropic_api_key);
-                if (s.openai_api_key) setOpenaiKey(s.openai_api_key);
-                if (s.imgbb_api_key) setImgbbKey(s.imgbb_api_key);
-            }
-        })();
-    }, []);
-
-    // ─── Settings persistence (debounced localStorage write) ───
-    const settingsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const debouncedSaveSettings = useCallback((nextSettings: FoodSeoSettings) => {
-        if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current);
-        settingsSaveTimer.current = setTimeout(() => saveLS("settings", nextSettings), 400);
-    }, []);
-
-    const updateSettings = useCallback((patch: Partial<FoodSeoSettings>) => {
-        setSettings(prev => {
-            const next = { ...prev, ...patch };
-            debouncedSaveSettings(next);
-            return next;
+      } else {
+        // Initial load specific keys even if no general config
+        setProvider((prev) => {
+          const next = { ...prev };
+          const contentKey = localStorage.getItem(`pinverse_content_api_key_${next.contentProvider}`);
+          if (contentKey) next.contentApiKey = contentKey;
+          const imageKey = localStorage.getItem(`pinverse_image_api_key_${next.imageProvider}`);
+          if (imageKey) next.imageApiKey = imageKey;
+          return next;
         });
-    }, [debouncedSaveSettings]);
+      }
+    } catch {
+      // Ignore parse errors
+    }
+  }, []);
 
-    const updateFeaturedImage = useCallback((patch: Partial<FeaturedImageSettings>) => {
-        setSettings(prev => {
-            const next = { ...prev, featuredImage: { ...prev.featuredImage, ...patch } };
-            debouncedSaveSettings(next);
-            return next;
-        });
-    }, [debouncedSaveSettings]);
+  // Save general settings to localStorage (keys saved individually on Save button click)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        const safeProvider = { ...provider, contentApiKey: "", imageApiKey: "" }; // Don't duplicate keys in general store
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ inputs, provider: safeProvider }));
+      } catch {
+        // Ignore storage errors
+      }
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [inputs, provider]);
 
-    // ─── Parse affiliates ───
-    useEffect(() => {
-        const links: AffiliateLink[] = affiliatesText
-            .split("\n").map(l => l.trim()).filter(Boolean)
-            .map(l => {
-                const parts = l.split("|").map(p => p.trim());
-                return { productName: parts[0] || "", url: parts[1] || "" };
-            })
-            .filter(a => a.productName && a.url);
-        updateSettings({ affiliateLinks: links });
-    }, [affiliatesText, updateSettings]);
+  const saveContentKey = () => {
+    localStorage.setItem(`pinverse_content_api_key_${provider.contentProvider}`, provider.contentApiKey);
+    setSavedKeys(prev => ({ ...prev, [`content_${provider.contentProvider}`]: true }));
+    setTimeout(() => setSavedKeys(prev => ({ ...prev, [`content_${provider.contentProvider}`]: false })), 2000);
+  };
 
-    // ─── Hooks ───
-    const articleGen = useArticleGeneration({
-        settings, geminiKey, replicateKey, imgbbKey, anthropicKey, openaiKey,
-        writingProvider, writingModel, imageProvider, imageModel,
-        wpUrl, wpUser, wpPassword, setStatusMessage, setActiveTab,
-    });
+  const saveImageKey = () => {
+    localStorage.setItem(`pinverse_image_api_key_${provider.imageProvider}`, provider.imageApiKey);
+    setSavedKeys(prev => ({ ...prev, [`image_${provider.imageProvider}`]: true }));
+    setTimeout(() => setSavedKeys(prev => ({ ...prev, [`image_${provider.imageProvider}`]: false })), 2000);
+  };
 
-    const pinGen = usePinGeneration({
-        writingModel, writingProvider,
-        niche: settings.niche, wpUrl,
-    });
+  const handleTestImage = async () => {
+    setTestingImage(true);
+    setTestImageResult(null);
+    try {
+      const { generateImageAction } = await import("@/app/actions/food-seo-writer/generate-v2");
+      const keyStr = provider.useSharedKey && provider.contentProvider === provider.imageProvider ? provider.contentApiKey : provider.imageApiKey;
+      const res = await generateImageAction(
+        "Test Image Cookie", 
+        "A beautiful test image of a fresh chocolate chip cookie on a wooden table, professional food photography", 
+        "Create a stunning high-quality photo of {content}.", // promptTemplate
+        "Food & Kitchen" as any, 
+        "", 
+        "Square 1:1" as any, 
+        provider, // config
+        inputs.imageSettings.imgbbApiKey // imgbbKey
+      );
+      if (res.success) setTestImageResult("success");
+      else setTestImageResult("error");
+    } catch {
+      setTestImageResult("error");
+    } finally {
+      setTestingImage(false);
+    }
+  };
 
-    // ─── Auto-populate pin cards when articles exist ───
-    useEffect(() => {
-        const readyArticles = articleGen.articles.filter(a => a.status === "ready" || a.status === "published");
-        if (readyArticles.length > 0 && pinGen.pinSets.length === 0 && !pinGen.autoPopulatedRef.current) {
-            pinGen.autoPopulatePins(articleGen.articles);
-        }
-    }, [articleGen.articles, pinGen]);
+  // Generate handler
+  const handleGenerate = useCallback(() => {
+    // Validate keyword
+    const words = inputs.core.mainKeyword.trim().split(/\s+/).filter(Boolean);
+    if (words.length < 2 || words.length > 8) {
+      setKeywordError("Keyword should be 2-8 words.");
+      return;
+    }
 
-    // ─── Memoized RankMath scoring per article ───
-    const articleScores = useMemo(() => {
-        if (articleGen.articles.length === 0) return new Map<string, { wordCount: number; score: number }>();
-        const scores = new Map<string, { wordCount: number; score: number }>();
-        for (const article of articleGen.articles) {
-            if (article.status !== 'ready' && article.status !== 'published') continue;
-            const wc = article.content.replace(/<[^>]*>/g, ' ').split(/\s+/).filter(Boolean).length;
-            let score = 0;
-            const contentLower = article.content.toLowerCase();
-            const kwLower = article.keyword.toLowerCase();
-            const h1Match = article.content.match(/<h1[^>]*>(.*?)<\/h1>/i);
-            if (h1Match && h1Match[1].toLowerCase().includes(kwLower)) score += RANK_MATH_WEIGHTS['Focus keyword in H1 title'];
-            const textContent = article.content.replace(/<[^>]*>/g, ' ');
-            if (textContent.split(/\s+/).slice(0, 100).join(' ').toLowerCase().includes(kwLower)) score += RANK_MATH_WEIGHTS['Focus keyword in first 100 words'];
-            if (article.metaDescription.toLowerCase().includes(kwLower)) score += RANK_MATH_WEIGHTS['Focus keyword in meta description'];
-            if ((article.content.match(/alt="([^"]*)"/gi) || []).some(a => a.toLowerCase().includes(kwLower))) score += RANK_MATH_WEIGHTS['Image alt text contains keyword'];
-            if ((article.content.match(/<!-- INTERNAL LINK:/gi) || []).length > 0) score += RANK_MATH_WEIGHTS['Internal links present'];
-            const authorityDomains = ['dietaryguidelines.gov', 'harvard', 'mayoclinic', 'cdc.gov', 'nih.gov', 'heart.org', 'usda', 'who.int'];
-            if (authorityDomains.some(d => contentLower.includes(d)) || (article.content.match(/<a[^>]+href="https?:\/\/[^"]*"[^>]*>/gi) || []).some(l => !l.includes('rel="nofollow"'))) score += RANK_MATH_WEIGHTS['External DoFollow link present'];
-            if (/frequently asked questions/i.test(article.content)) score += RANK_MATH_WEIGHTS['FAQ section present'];
-            if (wc >= 1200) score += RANK_MATH_WEIGHTS['Word count ≥ 1200'];
-            if (article.schemaMarkup && article.schemaMarkup.length > 50) score += RANK_MATH_WEIGHTS['Schema markup generated'];
-            const words = textContent.toLowerCase().split(/\s+/).filter(Boolean);
-            const kwWords = kwLower.split(/\s+/);
-            let kwCount = 0;
-            for (let ii = 0; ii <= words.length - kwWords.length; ii++) { if (words.slice(ii, ii + kwWords.length).join(' ') === kwLower) kwCount++; }
-            const density = words.length > 0 ? (kwCount * kwWords.length / words.length) * 100 : 0;
-            if (density >= 0.5 && density <= 1.5) score += RANK_MATH_WEIGHTS['Keyword density 0.5%-1.5%'];
-            if ((article.content.match(/<h2[^>]*>/gi) || []).length >= settings.h2Count) score += RANK_MATH_WEIGHTS['H2 count matches requested'];
-            if (['save this', 'meal planning', 'bookmark', 'pin this', 'save for later'].some(p => contentLower.includes(p))) score += RANK_MATH_WEIGHTS['Concluding paragraph present'];
-            scores.set(article.keyword.toLowerCase(), { wordCount: wc, score });
-        }
-        return scores;
-    }, [articleGen.articles, settings.h2Count]);
+    // Validate API key
+    if (!provider.contentApiKey) {
+      setKeywordError(`Please enter your ${provider.contentProvider.toUpperCase()} API key below.`);
+      return;
+    }
 
-    // ─── Sync batch queue with article statuses (uses memoized scores) ───
-    useEffect(() => {
-        if (batchQueue.length === 0 || articleGen.articles.length === 0) return;
+    setKeywordError("");
+    if (inputs.batch.mode === "batch") {
+      startBatch(inputs, provider);
+    } else {
+      generate(inputs, provider);
+    }
+  }, [inputs, provider, generate, startBatch]);
 
-        setBatchQueue(prev => prev.map(queueItem => {
-            const article = articleGen.articles.find(
-                a => a.keyword.toLowerCase() === queueItem.keyword.toLowerCase()
-            );
-            if (!article) return queueItem;
+  // Fix issues handler
+  const handleFixIssues = useCallback(() => {
+    fixIssues(inputs, provider);
+  }, [inputs, provider, fixIssues]);
 
-            if (article.status === 'generating' && queueItem.status !== 'generating') {
-                return { ...queueItem, status: 'generating' as const };
-            }
-            if (article.status === 'ready' || article.status === 'published') {
-                if (queueItem.status === 'ready') return queueItem;
-                const cached = articleScores.get(article.keyword.toLowerCase());
-                return { ...queueItem, status: 'ready' as const, wordCount: cached?.wordCount ?? 0, estimatedRankMathScore: cached?.score ?? 0, articleId: article.keyword };
-            }
-            if (article.status === 'error' && queueItem.status !== 'error') {
-                return { ...queueItem, status: 'error' as const, errorMessage: article.errorMessage || 'Generation failed' };
-            }
-            return queueItem;
-        }));
-    }, [articleGen.articles, batchQueue.length, articleScores]);
+  // New generation handler
+  const handleNewGeneration = useCallback(() => {
+    reset();
+    setBatchItems([]);
+  }, [reset, setBatchItems]);
 
+  const showResults = inputs.batch.mode === "single" && result !== null;
+  const isBatchActive = inputs.batch.mode === "batch" && batchItems.length > 0;
+  const showProgress = generating || progress.currentStage !== "input";
+  const hideForm = showResults || isBatchActive || generating;
 
-    // ─── WP Save ───
-    const saveWpCreds = useCallback(() => {
-        saveLS("wp_url", wpUrl);
-        saveLS("wp_user", wpUser);
-        saveLS("wp_password", wpPassword);
-        setStatusMessage("✅ WordPress credentials saved.");
-        setTimeout(() => setStatusMessage(""), 3000);
-    }, [wpUrl, wpUser, wpPassword]);
+  return (
+    <div style={containerStyle}>
+      {/* ━━━ Header ━━━ */}
+      <div style={headerStyle}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+          }}
+        >
+          <div>
+            <h1
+              style={{
+                fontSize: 26,
+                fontWeight: 800,
+                background: "linear-gradient(135deg, #10b981, #22d3ee)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+                margin: 0,
+              }}
+            >
+              🍳 Food SEO Writer v2.0
+            </h1>
+            <p style={{ fontSize: 14, color: "#64748b", margin: "4px 0 0 0" }}>
+              6-stage pipeline • 7 templates • 100-point scoring • Rank on Google, Pinterest & AI
+            </p>
+          </div>
+          {/* ━━━ Header Right (New Action) ━━━ */}
+          {(showResults || isBatchActive) && (
+            <button
+              onClick={handleNewGeneration}
+              style={{
+                padding: "8px 18px",
+                background: "#334155",
+                border: "1px solid #475569",
+                borderRadius: 8,
+                color: "#e2e8f0",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              ✨ New Generation
+            </button>
+          )}
+        </div>
+      </div>
 
-    // ─── API Key Save ───
-    const saveApiKey = useCallback(async (type: "gemini" | "replicate" | "imgbb" | "anthropic" | "openai", value: string) => {
-        if (!value) return;
-        const payload: Record<string, string> = {};
-        if (type === "gemini") payload.gemini_api_key = value;
-        if (type === "replicate") payload.replicate_api_key = value;
-        if (type === "imgbb") payload.imgbb_api_key = value;
-        if (type === "anthropic") payload.anthropic_api_key = value;
-        if (type === "openai") payload.openai_api_key = value;
-        await updateUserSettingsAction(payload);
-        setStatusMessage(`✅ ${type.toUpperCase()} key saved.`);
-        setTimeout(() => setStatusMessage(""), 3000);
-    }, []);
+      {/* ━━━ Input Phase ━━━ */}
+      {!hideForm && (
+        <>
+          {/* Seasonal Suggestion Banner */}
+          <SeasonalSuggestionBanner keyword={inputs.core.mainKeyword || undefined} />
 
-    // ─── File Upload ───
-    const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        let keywords: string[] = [];
-        const ext = file.name.split(".").pop()?.toLowerCase();
-        if (ext === "txt") keywords = await parseTxtFile(await file.text());
-        else if (ext === "csv") keywords = await parseCsvFile(await file.text());
-        else if (ext === "xlsx") keywords = await parseXlsxFile(await file.arrayBuffer());
-        else { alert("Unsupported file type."); return; }
-        setParsedKeywords(keywords.map(k => ({ text: k, checked: true })));
-        setTitlesGenerated(false);
-        setStatusMessage(`✅ Found ${keywords.length} keywords`);
-    };
-
-    // ─── Keyword actions ───
-    const toggleAll = (checked: boolean) => setParsedKeywords(prev => prev.map(k => ({ ...k, checked })));
-    const removeKeyword = (idx: number) => setParsedKeywords(prev => prev.filter((_, i) => i !== idx));
-
-
-    // ─── Keyword AI Analysis ───
-    const handleAnalyzeKeyword = useCallback((keyword: string) => {
-        if (analysisDebounceRef.current) clearTimeout(analysisDebounceRef.current);
-        if (!keyword.trim() || keyword.trim().length < 3) {
-            setKeywordAnalysis(null);
-            return;
-        }
-        setAnalysisLoading(true);
-        analysisDebounceRef.current = setTimeout(async () => {
-            try {
-                const result = await analyzeKeywordAction(
-                    keyword, geminiKey, writingProvider, writingModel,
-                    anthropicKey, openaiKey, replicateKey
-                );
-                setKeywordAnalysis(result);
-                // Auto-apply AI-detected settings (unless user has manually overridden)
-                updateSettings({
-                    tone: result.tone,
-                    h2Count: result.h2Count,
-                    schemaType: result.schemaType,
-                    authoritySource: result.authoritySource,
-                    contentStrategy: result.contentStrategy,
-                    titleFormula: result.titleFormula,
-                });
-            } catch {
-                // Silently fail — keep previous analysis or null
-            } finally {
-                setAnalysisLoading(false);
-            }
-        }, 600);
-    }, [geminiKey, writingProvider, writingModel, anthropicKey, openaiKey, replicateKey, updateSettings]);
-
-    // ─── Generate Titles ───
-    const handleGenerateTitles = useCallback(async () => {
-        const checked = parsedKeywords.filter(k => k.checked).map(k => k.text);
-        if (checked.length === 0) { alert("No keywords selected."); return; }
-
-        setTitleGenerating(true);
-        setStatusMessage("✨ Generating titles...");
-
-        const result = await generateFoodBulkTitlesAction(
-            checked, settings.tone, settings.niche, settings.titleFormula, settings.h2Count,
-            writingModel, writingProvider,
-            geminiKey, anthropicKey, openaiKey, replicateKey
-        );
-
-        if (result.success && result.titles) {
-            setParsedKeywords(prev => prev.map(k => {
-                const match = result.titles!.find(t => t.keyword.toLowerCase() === k.text.toLowerCase());
-                return match ? { ...k, generatedTitle: match.title } : k;
-            }));
-            setTitlesGenerated(true);
-            setStatusMessage(`✅ Generated ${result.titles.length} titles`);
-        } else {
-            setStatusMessage(`❌ ${result.error}`);
-        }
-        setTitleGenerating(false);
-    }, [parsedKeywords, settings.tone, settings.niche, settings.titleFormula, settings.h2Count, writingModel, writingProvider, geminiKey, anthropicKey, openaiKey, replicateKey]);
-
-    const regenerateTitle = useCallback(async (idx: number) => {
-        const kw = parsedKeywords[idx];
-        if (!kw) return;
-        const result = await generateFoodSingleTitleAction(
-            kw.text, settings.tone, settings.niche, settings.titleFormula, settings.h2Count,
-            writingModel, writingProvider,
-            geminiKey, anthropicKey, openaiKey, replicateKey
-        );
-        if (result.success && result.title) {
-            setParsedKeywords(prev => {
-                const copy = [...prev];
-                copy[idx] = { ...copy[idx], generatedTitle: result.title };
-                return copy;
-            });
-        }
-    }, [parsedKeywords, settings.tone, settings.niche, settings.titleFormula, settings.h2Count, writingModel, writingProvider, geminiKey, anthropicKey, openaiKey, replicateKey]);
-
-    // ─── Get Keywords + Titles ───
-    const getKeywordsAndTitles = useCallback((): { keyword: string; title: string }[] => {
-        if (keywordMode === "single") {
-            return singleKeyword.trim() ? [{ keyword: singleKeyword.trim(), title: singleKeyword.trim() }] : [];
-        }
-        return parsedKeywords
-            .filter(k => k.checked)
-            .map(k => ({ keyword: k.text, title: k.generatedTitle || k.text }));
-    }, [keywordMode, singleKeyword, parsedKeywords]);
-
-    // ─── Initialize batch queue and start generation ───
-    const handleStartGeneration = useCallback(() => {
-        const items = getKeywordsAndTitles();
-        if (items.length === 0) return;
-        const queue: BatchQueueItem[] = items.map((item, index) => ({
-            id: `batch-${index}-${Date.now()}`,
-            keyword: item.keyword,
-            status: 'queued' as const,
-        }));
-        setBatchQueue(queue);
-        articleGen.generateAllArticles(items);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [articleGen]);
-
-    // ─── Test Image API ───
-    const handleTestImageApi = useCallback(async () => {
-        setTestImageResult({ status: 'testing' });
-        const result = await testImageProviderAction(imageProvider, imageModel, geminiKey, replicateKey);
-        if (result.success && result.imageUrl) {
-            setTestImageResult({ status: 'success', url: result.imageUrl });
-        } else {
-            setTestImageResult({ status: 'error', error: result.error || "Unknown error" });
-        }
-    }, [imageProvider, imageModel, geminiKey, replicateKey]);
-
-    // ─── Tab Navigation ───
-    const tabs = [
-        { key: "setup" as const, label: "⚙️ Setup", icon: "1" },
-        { key: "studio" as const, label: "📝 Content Studio", icon: "2" },
-        { key: "pins" as const, label: "📌 Pinterest Pins", icon: "3" },
-    ];
-
-    return (
-        <div style={{ color: "#e2e8f0" }}>
-            {/* Tab Navigation */}
-            <div style={{
-                display: "grid", gridTemplateColumns: `repeat(${tabs.length}, 1fr)`,
-                background: "#1a2035", borderRadius: 12, padding: 4, marginBottom: 20,
-                border: "1px solid #334155",
-            }}>
-                {tabs.map(tab => (
-                    <button
-                        key={tab.key}
-                        onClick={() => setActiveTab(tab.key)}
-                        style={{
-                            background: activeTab === tab.key ? "#0f1623" : "transparent",
-                            border: activeTab === tab.key ? "1px solid #334155" : "1px solid transparent",
-                            borderRadius: 8, padding: "10px 16px",
-                            color: activeTab === tab.key ? "#10b981" : "#94a3b8",
-                            fontWeight: 600, cursor: "pointer", fontSize: 15, transition: "all 0.2s",
-                        }}
-                    >
-                        {tab.label}
-                    </button>
-                ))}
+          {/* 🤖 AI Configuration */}
+          <div style={providerCardStyle}>
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: 700,
+                color: "#10b981",
+                marginBottom: 16,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              🤖 AI Configuration
             </div>
 
-            {/* Status Bar */}
-            {statusMessage && (
-                <div style={{
-                    background: "#1e2a3a", border: "1px solid #334155", borderRadius: 8,
-                    padding: "8px 16px", marginBottom: 16, color: "#e2e8f0", fontSize: 14,
-                }}>
-                    {statusMessage}
+            {/* ── Content Generation ── */}
+            <div style={{ marginBottom: 12, fontSize: 13, fontWeight: 600, color: "#94a3b8", borderBottom: "1px solid #334155", paddingBottom: 6 }}>
+              ── Content Generation ──
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Provider</label>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
+                {(["gemini", "openai", "anthropic", "replicate"] as ContentProvider[]).map(p => (
+                  <label key={p} style={{ fontSize: 14, color: "#e2e8f0", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input 
+                      type="radio" 
+                      name="contentProvider" 
+                      value={p} 
+                      checked={provider.contentProvider === p}
+                      onChange={() => {
+                        const key = localStorage.getItem(`pinverse_content_api_key_${p}`) || "";
+                        setProvider(prev => ({ 
+                          ...prev, 
+                          contentProvider: p, 
+                          contentModel: CONTENT_MODELS[p][0].value,
+                          contentApiKey: key
+                        }));
+                      }}
+                    />
+                    {p.charAt(0).toUpperCase() + p.slice(1)}
+                  </label>
+                ))}
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+                <div>
+                  <label style={labelStyle}>Model</label>
+                  <select
+                    value={provider.contentModel}
+                    onChange={(e) => setProvider((prev) => ({ ...prev, contentModel: e.target.value }))}
+                    style={selectStyle}
+                  >
+                    {CONTENT_MODELS[provider.contentProvider].map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-            )}
+                <div>
+                  <label style={labelStyle}>API Key <span style={{ color: "#ef4444" }}>*</span></label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      type="password"
+                      placeholder={`Enter your ${provider.contentProvider} API key`}
+                      value={provider.contentApiKey}
+                      onChange={(e) => setProvider(prev => ({ ...prev, contentApiKey: e.target.value }))}
+                      style={{ ...inputStyle, flex: 1 }}
+                    />
+                    <button 
+                      onClick={saveContentKey}
+                      style={{ padding: "0 12px", background: "#334155", border: "1px solid #475569", borderRadius: 8, color: "#e2e8f0", fontSize: 13, cursor: "pointer" }}
+                    >
+                      💾 Save
+                    </button>
+                    {savedKeys[`content_${provider.contentProvider}`] && (
+                      <span style={{ color: "#4ade80", fontSize: 13, display: "flex", alignItems: "center" }}>Saved ✓</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+                    Get yours at {{ gemini: "aistudio.google.com", openai: "platform.openai.com", anthropic: "console.anthropic.com", replicate: "replicate.com" }[provider.contentProvider]}
+                  </div>
+                </div>
+              </div>
+            </div>
 
-            {/* ━━━ SETUP TAB ━━━ */}
-            {activeTab === "setup" && (
-                <SetupTab
-                    settings={settings}
-                    updateSettings={updateSettings}
-                    updateFeaturedImage={updateFeaturedImage}
-                    geminiKey={geminiKey} setGeminiKey={setGeminiKey}
-                    replicateKey={replicateKey} setReplicateKey={setReplicateKey}
-                    anthropicKey={anthropicKey} setAnthropicKey={setAnthropicKey}
-                    openaiKey={openaiKey} setOpenaiKey={setOpenaiKey}
-                    imgbbKey={imgbbKey} setImgbbKey={setImgbbKey}
-                    writingProvider={writingProvider} setWritingProvider={setWritingProvider}
-                    writingModel={writingModel} setWritingModel={setWritingModel}
-                    imageProvider={imageProvider} setImageProvider={setImageProvider}
-                    imageModel={imageModel} setImageModel={setImageModel}
-                    wpUrl={wpUrl} setWpUrl={setWpUrl}
-                    wpUser={wpUser} setWpUser={setWpUser}
-                    wpPassword={wpPassword} setWpPassword={setWpPassword}
-                    keywordMode={keywordMode} setKeywordMode={setKeywordMode}
-                    singleKeyword={singleKeyword} setSingleKeyword={setSingleKeyword}
-                    parsedKeywords={parsedKeywords} setParsedKeywords={setParsedKeywords}
-                    titlesGenerated={titlesGenerated}
-                    affiliatesText={affiliatesText} setAffiliatesText={setAffiliatesText}
-                    titleGenerating={titleGenerating}
-                    generating={articleGen.generating}
-                    imageSettingsOpen={imageSettingsOpen} setImageSettingsOpen={setImageSettingsOpen}
-                    testImageResult={testImageResult}
-                    keywordAnalysis={keywordAnalysis}
-                    analysisLoading={analysisLoading}
-                    onAnalyzeKeyword={handleAnalyzeKeyword}
-                    onSaveApiKey={saveApiKey}
-                    onSaveWpCreds={saveWpCreds}
-                    onFileUpload={handleFileUpload}
-                    onGenerateTitles={handleGenerateTitles}
-                    onRegenerateTitle={regenerateTitle}
-                    onRemoveKeyword={removeKeyword}
-                    onToggleAll={toggleAll}
-                    onTestImageApi={handleTestImageApi}
-                    onGenerate={handleStartGeneration}
-                    saveLS={saveLS}
-                />
-            )}
+            {/* ── Image Generation ── */}
+            <div style={{ marginBottom: 12, fontSize: 13, fontWeight: 600, color: "#94a3b8", borderBottom: "1px solid #334155", paddingBottom: 6 }}>
+              ── Image Generation ──
+            </div>
 
-            {/* ━━━ CONTENT STUDIO TAB ━━━ */}
-            {activeTab === "studio" && (
-                <ContentStudioTab
-                    articles={articleGen.articles}
-                    generating={articleGen.generating}
-                    generationProgress={articleGen.generationProgress}
-                    paused={articleGen.paused}
-                    wpUrl={wpUrl} wpUser={wpUser} wpPassword={wpPassword}
-                    geminiKey={geminiKey} replicateKey={replicateKey}
-                    imgbbKey={imgbbKey}
-                    writingModel={writingModel}
-                    imageProvider={imageProvider} imageModel={imageModel}
-                    imageSettings={settings.featuredImage}
-                    onUpdate={articleGen.updateArticle}
-                    onPause={articleGen.handlePause}
-                    onStop={articleGen.handleStop}
-                    onPublishAll={articleGen.publishAllToWP}
-                    onExportTitlesCSV={() => articleGen.exportTitlesCSV(getKeywordsAndTitles())}
-                    onExportZip={articleGen.exportArticlesZip}
-                    onSwitchToSetup={() => setActiveTab("setup")}
-                    onSendToPins={(keyword, title, pinTitle, pinDescription) => {
-                        pinGen.addArticlePinData(keyword, title, pinTitle, pinDescription);
-                        setStatusMessage("📌 Pin data sent to Pinterest Pins tab!");
-                        setTimeout(() => setStatusMessage(""), 3000);
-                    }}
-                    requestedH2Count={settings.h2Count}
-                    batchQueue={batchQueue}
-                />
-            )}
+            <div style={{ marginBottom: 16 }}>
+              <label style={labelStyle}>Provider</label>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
+                {(["gemini", "replicate"] as ImageProvider[]).map(p => (
+                  <label key={p} style={{ fontSize: 14, color: "#e2e8f0", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input 
+                      type="radio" 
+                      name="imageProvider" 
+                      value={p} 
+                      checked={provider.imageProvider === p}
+                      onChange={() => {
+                        const key = localStorage.getItem(`pinverse_image_api_key_${p}`) || "";
+                        setProvider(prev => ({ 
+                          ...prev, 
+                          imageProvider: p, 
+                          imageModel: IMAGE_MODELS[p][0].value,
+                          imageApiKey: key,
+                          useSharedKey: p === prev.contentProvider
+                        }));
+                      }}
+                    />
+                    {p.charAt(0).toUpperCase() + p.slice(1)}
+                  </label>
+                ))}
+              </div>
 
-            {/* ━━━ PINTEREST PINS TAB ━━━ */}
-            {activeTab === "pins" && (
-                <PinterestPinsTab
-                    articles={articleGen.articles}
-                    wpBaseUrl={wpUrl}
-                    geminiKey={geminiKey}
-                    geminiModel={writingModel}
-                    targetKeyword={keywordMode === "single" ? singleKeyword : (parsedKeywords.find(k => k.checked)?.text || "")}
-                    pinSets={pinGen.pinSets}
-                    generatingPins={pinGen.generatingPins}
-                    onGeneratePins={pinGen.generatePinsForArticles}
-                    onAutoPopulate={() => pinGen.autoPopulatePins(articleGen.articles)}
-                />
-            )}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+                <div>
+                  <label style={labelStyle}>Model</label>
+                  <select
+                    value={provider.imageModel}
+                    onChange={(e) => setProvider((prev) => ({ ...prev, imageModel: e.target.value }))}
+                    style={selectStyle}
+                  >
+                    {IMAGE_MODELS[provider.imageProvider].map((m) => (
+                      <option key={m.value} value={m.value}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>API Key <span style={{ color: "#ef4444" }}>*</span></label>
+                  {provider.imageProvider === provider.contentProvider ? (
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={{ fontSize: 13, color: "#e2e8f0", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={provider.useSharedKey}
+                          onChange={(e) => setProvider(prev => ({ ...prev, useSharedKey: e.target.checked }))}
+                        />
+                        Same as content key ✓
+                      </label>
+                    </div>
+                  ) : null}
+
+                  {(!provider.useSharedKey || provider.imageProvider !== provider.contentProvider) && (
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input
+                        type="password"
+                        placeholder={`Enter your ${provider.imageProvider} API key for images`}
+                        value={provider.imageApiKey}
+                        onChange={(e) => setProvider(prev => ({ ...prev, imageApiKey: e.target.value }))}
+                        style={{ ...inputStyle, flex: 1 }}
+                      />
+                      <button 
+                        onClick={saveImageKey}
+                        style={{ padding: "0 12px", background: "#334155", border: "1px solid #475569", borderRadius: 8, color: "#e2e8f0", fontSize: 13, cursor: "pointer" }}
+                      >
+                        💾 Save
+                      </button>
+                      {savedKeys[`image_${provider.imageProvider}`] && (
+                        <span style={{ color: "#4ade80", fontSize: 13, display: "flex", alignItems: "center" }}>Saved ✓</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button
+                  type="button"
+                  onClick={handleTestImage}
+                  disabled={testingImage}
+                  style={{
+                    padding: "6px 16px",
+                    background: testingImage ? "#334155" : "#0284c7",
+                    border: "none",
+                    borderRadius: 6,
+                    color: "#fff",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: testingImage ? "wait" : "pointer",
+                  }}
+                >
+                  {testingImage ? "Testing..." : "🎨 Test"}
+                </button>
+                {testImageResult === "success" && <span style={{ color: "#4ade80", fontSize: 13, fontWeight: 600 }}>✅ Working!</span>}
+                {testImageResult === "error" && <span style={{ color: "#ef4444", fontSize: 13, fontWeight: 600 }}>❌ Error testing API key</span>}
+              </div>
+            </div>
+          </div>
+
+          {/* Input Form */}
+          <InputForm
+            inputs={inputs}
+            onUpdate={setInputs}
+            onGenerate={handleGenerate}
+            generating={generating}
+            keywordError={keywordError}
+          />
+        </>
+      )}
+
+      {/* ━━━ Batch Progress ━━━ */}
+      {isBatchActive && (
+        <BatchProgress
+          items={batchItems}
+          currentIndex={currentBatchIndex}
+          isProcessing={isBatchProcessing}
+          onStop={stopBatch}
+        />
+      )}
+
+      {/* ━━━ Progress Indicator ━━━ */}
+      {showProgress && <ProgressIndicator progress={progress} />}
+
+      {/* ━━━ Cancel Button (Single Mode) ━━━ */}
+      {generating && !isBatchProcessing && (
+        <div style={{ textAlign: "center", marginBottom: 16 }}>
+          <button
+            onClick={abort}
+            style={{
+              padding: "8px 24px",
+              background: "#7f1d1d",
+              border: "1px solid #991b1b",
+              borderRadius: 8,
+              color: "#fca5a5",
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            ⛔ Cancel Generation
+          </button>
         </div>
-    );
+      )}
+
+      {/* ━━━ Output Phase (Single Mode) ━━━ */}
+      {showResults && result && (
+        <>
+          <OutputTabs
+            result={result}
+            keyword={inputs.core.mainKeyword}
+            onFixIssues={handleFixIssues}
+            fixing={fixing}
+          />
+
+          <ExportButtons result={result} keyword={inputs.core.mainKeyword} inputs={inputs} />
+        </>
+      )}
+    </div>
+  );
 }
