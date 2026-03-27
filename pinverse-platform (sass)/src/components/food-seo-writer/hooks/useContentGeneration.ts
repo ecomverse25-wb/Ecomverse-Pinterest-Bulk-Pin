@@ -22,6 +22,7 @@ import {
   generateContentAction,
   optimizeSeoAction,
   generatePinterestCopyAction,
+  generateImageAction,
 } from "@/app/actions/food-seo-writer/generate-v2";
 import {
   generateRecipeSchema,
@@ -82,7 +83,7 @@ export function useContentGeneration() {
   // ─── Full Pipeline ───
 
   const generate = useCallback(
-    async (inputs: FormInputs, provider: ProviderSettings) => {
+    async (inputs: FormInputs, provider: ProviderSettings, options?: { isBatchMode?: boolean }): Promise<PipelineResult | null> => {
       setGenerating(true);
       abortRef.current = false;
       setResult(null);
@@ -103,7 +104,7 @@ export function useContentGeneration() {
         addLog(`  Title: "${researchResult.result.title}"`);
         addLog(`  Outline: ${researchResult.result.outline.length} sections`);
 
-        if (abortRef.current) return;
+        if (abortRef.current) return null;
 
         // ━━━ STAGE 3: Content Generation ━━━
         setStage("content", "active");
@@ -117,7 +118,7 @@ export function useContentGeneration() {
         setStage("content", "completed");
         addLog(`✓ Content generated. ${contentResult.wordCount || 0} words.`);
 
-        if (abortRef.current) return;
+        if (abortRef.current) return null;
 
         // ━━━ STAGE 3.5: Image Generation ━━━
         let finalContentHtml = contentResult.content;
@@ -131,7 +132,8 @@ export function useContentGeneration() {
             finalContentHtml,
             contentResult.title || researchResult.result.title,
             inputs,
-            provider
+            provider,
+            addLog
           );
 
           if (imageResult.success) {
@@ -147,26 +149,74 @@ export function useContentGeneration() {
           addLog("→ Image generation skipped (disabled)");
         }
 
-        if (abortRef.current) return;
+        if (abortRef.current) return null;
 
         // ━━━ STAGE 4: SEO Optimization ━━━
-        setStage("seo", "active");
-        addLog("Running SEO optimization checks...");
+        let finalContent: string;
+        let finalTitle: string;
+        let finalMeta: string;
+        let seoUrlSlug: string;
 
-        const seoResult = await optimizeSeoAction(
-          finalContentHtml,
-          contentResult.title || researchResult.result.title,
-          contentResult.metaDescription || researchResult.result.metaDescription,
-          inputs.core.mainKeyword,
-          provider
-        );
-        if (!seoResult.success) {
-          throw new Error(seoResult.error || "SEO optimization failed");
+        if (options?.isBatchMode) {
+          // Batch mode: skip redundant AI SEO call — content already has all SEO rules
+          // baked into the system prompt. Use local validation only.
+          setStage("seo", "active");
+          addLog("Running local SEO validation (batch mode)...");
+
+          finalContent = finalContentHtml;
+          finalTitle = contentResult.title || researchResult.result.title;
+          finalMeta = contentResult.metaDescription || researchResult.result.metaDescription;
+          seoUrlSlug = researchResult.result.urlSlug;
+
+          // Local fallback: ensure at least one external link (E-E-A-T signal)
+          const extLinkCount = (finalContent.match(/href="https?:\/\//gi) || []).length;
+          if (extLinkCount === 0) {
+            const nutritionNote = `<h2>Nutrition Note</h2>\n<p>For detailed nutritional information on common recipe ingredients, the <a href="https://fdc.nal.usda.gov/" target="_blank" rel="noopener noreferrer">USDA FoodData Central database</a> provides comprehensive, science-backed nutrient data that can help you make informed dietary choices.</p>`;
+            const faqMatch = finalContent.match(/<h2[^>]*>.*?(?:FAQ|Frequently Asked)/i);
+            if (faqMatch && faqMatch.index !== undefined) {
+              finalContent = finalContent.slice(0, faqMatch.index) + nutritionNote + "\n" + finalContent.slice(faqMatch.index);
+            } else {
+              finalContent += "\n" + nutritionNote;
+            }
+          }
+
+          // Enforce meta description 160 char limit locally
+          if (finalMeta.length > 160) {
+            const kwLower = inputs.core.mainKeyword.toLowerCase();
+            let truncated = finalMeta.substring(0, 155);
+            const lastSpace = truncated.lastIndexOf(" ");
+            if (lastSpace > 100) truncated = truncated.substring(0, lastSpace);
+            truncated = truncated.replace(/[,;:\-]$/, "").trim() + "...";
+            if (truncated.toLowerCase().includes(kwLower)) {
+              finalMeta = truncated;
+            }
+          }
+
+          setStage("seo", "completed");
+        } else {
+          // Single mode: full AI SEO optimization pass
+          setStage("seo", "active");
+          addLog("Running SEO optimization checks...");
+
+          const seoResult = await optimizeSeoAction(
+            finalContentHtml,
+            contentResult.title || researchResult.result.title,
+            contentResult.metaDescription || researchResult.result.metaDescription,
+            inputs.core.mainKeyword,
+            provider
+          );
+          if (!seoResult.success) {
+            throw new Error(seoResult.error || "SEO optimization failed");
+          }
+
+          finalContent = seoResult.optimizedContent || contentResult.content;
+          finalTitle = seoResult.optimizedTitle || contentResult.title || researchResult.result.title;
+          finalMeta = seoResult.optimizedMetaDescription || contentResult.metaDescription || researchResult.result.metaDescription;
+          seoUrlSlug = seoResult.urlSlug || researchResult.result.urlSlug;
+
+          setStage("seo", "completed");
+          addLog(`✓ SEO optimization complete.`);
         }
-
-        const finalContent = seoResult.optimizedContent || contentResult.content;
-        const finalTitle = seoResult.optimizedTitle || contentResult.title || researchResult.result.title;
-        const finalMeta = seoResult.optimizedMetaDescription || contentResult.metaDescription || researchResult.result.metaDescription;
 
         // Extract recipe and FAQ from content
         const recipeCard = extractRecipeFromContent(finalContent);
@@ -174,11 +224,9 @@ export function useContentGeneration() {
 
         // Build SEO checklist
         const seoChecklist = buildSeoChecklist(finalContent, finalTitle, finalMeta, inputs.core.mainKeyword);
+        addLog(`✓ SEO score: Rank Math ${seoChecklist.rankMathScore}/100`);
 
-        setStage("seo", "completed");
-        addLog(`✓ SEO optimization complete. Rank Math score: ${seoChecklist.rankMathScore}`);
-
-        if (abortRef.current) return;
+        if (abortRef.current) return null;
 
         // ━━━ STAGE 5: Pinterest Optimization ━━━
         let pinterestResult: PinterestCopyResult;
@@ -196,16 +244,83 @@ export function useContentGeneration() {
           );
 
           if (pinResult.success && pinResult.result) {
+            // Extract featured image URL from generated article
+            const featuredImgMatch = finalContent.match(
+              /<figure[^>]*class=["'][^"']*featured-image[^"']*["'][^>]*>[\s\S]*?<img[^>]*src=["']([^"']+)["']/i
+            );
+            const featuredImageUrl = featuredImgMatch?.[1] ?? '';
+
             pinterestResult = {
               pinTitles: pinResult.result.pinTitles.map((t, i) => ({ index: i, ...t })),
               pinDescriptions: pinResult.result.pinDescriptions.map((d, i) => ({ index: i, ...d })),
               tobiOverlays: pinResult.result.tobiOverlays.map((t, i) => ({ index: i, ...t })),
               boardSuggestions: pinResult.result.boardSuggestions,
               hiddenPins: pinResult.result.hiddenPins,
-              ogMetaTags: `<meta property="og:title" content="${finalTitle}" />\n<meta property="og:description" content="${finalMeta}" />\n<meta property="og:type" content="article" />\n<meta property="og:image" content="[Featured Image URL]" />`,
+              ogMetaTags: `<meta property="og:title" content="${finalTitle}" />\n<meta property="og:description" content="${finalMeta}" />\n<meta property="og:type" content="article" />\n<meta property="og:image" content="${featuredImageUrl}" />`,
               dataPinDescriptions: pinResult.result.pinDescriptions.map((d) => d.text),
+              pinImages: [],
             };
             addLog(`✓ Pinterest copy: ${pinResult.result.pinTitles.length} variants generated`);
+
+            // FIX 3: Pinterest Pin Image Generation (parallelized in batches of 3)
+            if (inputs.imageSettings.enabled) {
+              const numVariants = pinResult.result.pinTitles.length;
+              addLog(`Generating ${numVariants} Pinterest pin images (parallel batches of 3)...`);
+
+              const pinImages: GeneratedImage[] = [];
+              const PIN_BATCH_SIZE = 3;
+
+              const generatePinWithRetries = async (i: number) => {
+                const pinTitle = pinResult.result!.pinTitles[i].text;
+                const promptTemplate = inputs.imageSettings.promptInstructions;
+                const pinPrompt = `Pinterest pin image for: "${pinTitle}". Food photography style. Vertical portrait format. Include the text "${pinTitle}" as a bold overlay at the bottom of the image with a dark semi-transparent background strip.`;
+                const maxRetries = 3;
+
+                for (let attempt = 1; attempt <= maxRetries; attempt++) {
+                  try {
+                    const imgResult = await generateImageAction(
+                      pinTitle, pinPrompt, promptTemplate,
+                      inputs.imageSettings.style, inputs.imageSettings.colorMood,
+                      "Pinterest Portrait 2:3", provider as any,
+                      inputs.imageSettings.imgbbApiKey, 'pin'
+                    );
+                    if (imgResult.success && imgResult.imageUrl) {
+                      return { success: true as const, imageUrl: imgResult.imageUrl, index: i, pinTitle };
+                    }
+                    addLog(`[Image] Pin ${i + 1} attempt ${attempt}/${maxRetries} — no image, retrying...`);
+                  } catch (err: any) {
+                    addLog(`[Image] Pin ${i + 1} attempt ${attempt}/${maxRetries} failed: ${err.message || "Failed"}`);
+                  }
+                  if (attempt < maxRetries) await new Promise(r => setTimeout(r, 2000));
+                }
+                return { success: false as const, index: i, pinTitle };
+              };
+
+              for (let batchStart = 0; batchStart < numVariants; batchStart += PIN_BATCH_SIZE) {
+                const batchIndices = Array.from(
+                  { length: Math.min(PIN_BATCH_SIZE, numVariants - batchStart) },
+                  (_, k) => batchStart + k
+                );
+                const results = await Promise.allSettled(batchIndices.map(i => generatePinWithRetries(i)));
+
+                for (const settled of results) {
+                  if (settled.status === "fulfilled" && settled.value.success) {
+                    pinImages.push({
+                      sectionHeading: `Pin Variant ${settled.value.index + 1}`,
+                      altText: settled.value.pinTitle,
+                      hostedUrl: settled.value.imageUrl!
+                    });
+                  } else if (settled.status === "fulfilled") {
+                    addLog(`[Image Warning] All retries failed for pin ${settled.value.index + 1} — continuing without image`);
+                  }
+                }
+              }
+
+              if (pinImages.length > 0) {
+                pinterestResult.pinImages = pinImages;
+                addLog(`✓ Pin image generation complete. Added ${pinImages.length} images.`);
+              }
+            }
           } else {
             pinterestResult = createEmptyPinterest();
             addLog("⚠ Pinterest copy generation failed — using empty defaults");
@@ -217,7 +332,7 @@ export function useContentGeneration() {
           addLog("→ Pinterest copy skipped (disabled)");
         }
 
-        if (abortRef.current) return;
+        if (abortRef.current) return null;
 
         // ━━━ STAGE 6: Quality Scoring ━━━
         setStage("scoring", "active");
@@ -231,7 +346,7 @@ export function useContentGeneration() {
           title: finalTitle,
           articleHtml: finalContent,
           metaDescription: finalMeta,
-          urlSlug: seoResult.urlSlug || researchResult.result.urlSlug,
+          urlSlug: seoUrlSlug,
           wordCount: finalContent.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length,
           recipeCards: recipeCard ? [recipeCard] : [],
           faqItems,
@@ -270,6 +385,7 @@ export function useContentGeneration() {
 
         setResult(pipelineResult);
         addLog("✅ All stages complete. Content ready for review.");
+        return pipelineResult;
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : "Unknown error occurred";
         setProgress((prev) => ({
@@ -281,6 +397,7 @@ export function useContentGeneration() {
           },
         }));
         addLog(`❌ Error: ${errMsg}`);
+        return null;
       } finally {
         setGenerating(false);
       }
@@ -504,9 +621,11 @@ function buildSeoChecklist(
     details: `${imgAltWithKw.length} of ${imgAlts.length} images have keyword in alt text`,
   });
 
-  // Internal/external links
-  const internalLinks = (content.match(/<a\s[^>]*href="(?!https?:\/\/)/gi) || []).length;
-  const externalLinks = (content.match(/<a\s[^>]*href="https?:\/\//gi) || []).length;
+  // Internal/external links — only count absolute URLs, NOT relative /slug links (those are fabricated and stripped)
+  const allLinks = content.match(/<a\s[^>]*href="https?:\/\/[^"]+"/gi) || [];
+  // Internal = links to WP site domain (e.g. sourcerecipes.info)
+  const internalLinks = allLinks.filter(l => /sourcerecipes\.info|localhost/i.test(l)).length;
+  const externalLinks = allLinks.length - internalLinks;
   checks.push({
     name: "At least 2 internal + 1 external link",
     passed: internalLinks >= 2 && externalLinks >= 1,
@@ -555,6 +674,12 @@ function buildSchemas(content: GeneratedContent, inputs: FormInputs): SchemaResu
     faqValidation = [{ status: "warning" as const, message: "No FAQ section found in content" }];
   }
 
+  // Extract featured image from generated article
+  const featuredImgMatch = content.articleHtml.match(
+    /<figure[^>]*class=["'][^"']*featured-image[^"']*["'][^>]*>[\s\S]*?<img[^>]*src=["']([^"']+)["']/i
+  );
+  const featuredImageUrl = featuredImgMatch?.[1] || undefined;
+
   // Article schema (always generated)
   const a = generateArticleSchema(
     content.title,
@@ -563,7 +688,7 @@ function buildSchemas(content: GeneratedContent, inputs: FormInputs): SchemaResu
     undefined,
     undefined,
     undefined,
-    undefined,
+    featuredImageUrl,
     inputs.core.targetSite ? `${inputs.core.targetSite}/${content.urlSlug}` : undefined
   );
 
@@ -588,5 +713,6 @@ function createEmptyPinterest(): PinterestCopyResult {
     hiddenPins: [],
     ogMetaTags: "",
     dataPinDescriptions: [],
+    pinImages: [],
   };
 }

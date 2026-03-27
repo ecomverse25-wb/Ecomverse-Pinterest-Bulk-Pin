@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import type {
   FormInputs,
   ProductLink,
@@ -163,6 +163,36 @@ export default function InputForm({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [savedKeys, setSavedKeys] = useState<Record<string, boolean>>({});
 
+  const refSecondary = useRef<HTMLInputElement>(null);
+  const [msgSecondary, setMsgSecondary] = useState("");
+  const refQualifier = useRef<HTMLInputElement>(null);
+  const [msgQualifier, setMsgQualifier] = useState("");
+  const refContextual = useRef<HTMLInputElement>(null);
+  const [msgContextual, setMsgContextual] = useState("");
+
+  useEffect(() => {
+    const storedLinkAttr = localStorage.getItem('pinverse_link_attribute');
+    if (storedLinkAttr === 'nofollow noopener') {
+      localStorage.setItem('pinverse_link_attribute', 'sponsored noopener');
+    }
+  }, []);
+
+  const handleKeywordUpload = (e: React.ChangeEvent<HTMLInputElement>, current: string, updater: (val: string) => void, setMsg: (msg: string) => void) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result as string;
+      const extracted = text.split(/\r?\n/).map(line => line.split(',')[0].trim()).filter(Boolean);
+      const newKw = current ? current + ", " + extracted.join(", ") : extracted.join(", ");
+      updater(newKw);
+      setMsg(`✓ Added ${extracted.length} keywords from file`);
+      setTimeout(() => setMsg(""), 3000);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   const saveToLocalStorage = (key: string, value: string, id: string) => {
     localStorage.setItem(key, value);
     setSavedKeys(prev => ({ ...prev, [id]: true }));
@@ -221,10 +251,11 @@ export default function InputForm({
 
   // Validate keyword
   const keywordWords = inputs.core.mainKeyword.trim().split(/\s+/).filter(Boolean).length;
-  const kwValid =
-    inputs.core.mainKeyword.trim().length > 0 &&
-    keywordWords >= KEYWORD_MIN_WORDS &&
-    keywordWords <= KEYWORD_MAX_WORDS;
+  const kwValid = inputs.batch.mode === "batch" 
+    ? inputs.batch.keywords.filter(k => k.trim()).length > 0
+    : (inputs.core.mainKeyword.trim().length > 0 &&
+       keywordWords >= KEYWORD_MIN_WORDS &&
+       keywordWords <= KEYWORD_MAX_WORDS);
 
   const canGenerate = kwValid && inputs.core.contentType && !generating;
 
@@ -318,8 +349,8 @@ export default function InputForm({
               style={selectStyle}
             >
               {CONTENT_TYPE_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt}
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>
@@ -362,33 +393,54 @@ export default function InputForm({
         </p>
 
         <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Secondary Keywords</label>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <label style={{ ...labelStyle, marginBottom: 0 }}>Secondary Keywords</label>
+            <button type="button" onClick={() => refSecondary.current?.click()} style={{ fontSize: 12, padding: "4px 8px", background: "#334155", color: "#e2e8f0", border: "1px solid #475569", borderRadius: 4, cursor: "pointer" }}>
+              📁 Upload .txt, .CSV
+            </button>
+            <input type="file" accept=".txt,.csv" ref={refSecondary} style={{ display: "none" }} onChange={(e) => handleKeywordUpload(e, inputs.keywords.secondaryKeywords || "", (val) => updateKeywords({ secondaryKeywords: val }), setMsgSecondary)} />
+          </div>
           <textarea
             placeholder='Comma-separated: "slow cooker chicken, crockpot beef stew"'
             value={inputs.keywords.secondaryKeywords}
             onChange={(e) => updateKeywords({ secondaryKeywords: e.target.value })}
             style={textareaStyle}
           />
+          {msgSecondary && <div style={{ color: "#10b981", fontSize: 12, marginTop: 4 }}>{msgSecondary}</div>}
         </div>
 
         <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Qualifier Keywords</label>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <label style={{ ...labelStyle, marginBottom: 0 }}>Qualifier Keywords</label>
+            <button type="button" onClick={() => refQualifier.current?.click()} style={{ fontSize: 12, padding: "4px 8px", background: "#334155", color: "#e2e8f0", border: "1px solid #475569", borderRadius: 4, cursor: "pointer" }}>
+              📁 Upload .txt, .CSV
+            </button>
+            <input type="file" accept=".txt,.csv" ref={refQualifier} style={{ display: "none" }} onChange={(e) => handleKeywordUpload(e, inputs.keywords.qualifierKeywords || "", (val) => updateKeywords({ qualifierKeywords: val }), setMsgQualifier)} />
+          </div>
           <textarea
             placeholder='"for beginners", "under 30 minutes", "budget-friendly", "keto"'
             value={inputs.keywords.qualifierKeywords}
             onChange={(e) => updateKeywords({ qualifierKeywords: e.target.value })}
             style={textareaStyle}
           />
+          {msgQualifier && <div style={{ color: "#10b981", fontSize: 12, marginTop: 4 }}>{msgQualifier}</div>}
         </div>
 
         <div>
-          <label style={labelStyle}>Contextual Keywords</label>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <label style={{ ...labelStyle, marginBottom: 0 }}>Contextual Keywords</label>
+            <button type="button" onClick={() => refContextual.current?.click()} style={{ fontSize: 12, padding: "4px 8px", background: "#334155", color: "#e2e8f0", border: "1px solid #475569", borderRadius: 4, cursor: "pointer" }}>
+              📁 Upload .txt, .CSV
+            </button>
+            <input type="file" accept=".txt,.csv" ref={refContextual} style={{ display: "none" }} onChange={(e) => handleKeywordUpload(e, inputs.keywords.contextualKeywords || "", (val) => updateKeywords({ contextualKeywords: val }), setMsgContextual)} />
+          </div>
           <textarea
             placeholder='"comfort food, family dinner, weeknight meals"'
             value={inputs.keywords.contextualKeywords}
             onChange={(e) => updateKeywords({ contextualKeywords: e.target.value })}
             style={textareaStyle}
           />
+          {msgContextual && <div style={{ color: "#10b981", fontSize: 12, marginTop: 4 }}>{msgContextual}</div>}
         </div>
       </div>
 
@@ -866,19 +918,17 @@ export default function InputForm({
       {/* ━━━ Generate Button ━━━ */}
       <button
         onClick={onGenerate}
-        disabled={!canGenerate}
+        disabled={generating}
         style={{
           width: "100%",
           padding: "14px 24px",
-          background: canGenerate
-            ? "linear-gradient(135deg, #10b981, #059669)"
-            : "#334155",
+          background: "linear-gradient(135deg, #10b981, #059669)",
           border: "none",
           borderRadius: 12,
           color: "white",
           fontSize: 16,
           fontWeight: 700,
-          cursor: canGenerate ? "pointer" : "not-allowed",
+          cursor: generating ? "wait" : "pointer",
           transition: "all 0.2s",
           opacity: generating ? 0.7 : 1,
         }}

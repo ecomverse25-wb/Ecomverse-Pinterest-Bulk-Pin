@@ -67,10 +67,13 @@ export async function publishToWordPress(options: WordPressPublishOptions): Prom
     }
 
     // 2. Publish Post
+    let finalContent = content;
+    finalContent = finalContent.replace(/<figure[^>]*class=["'][^"']*featured-image[^"']*["'][^>]*>[\s\S]*?<\/figure>\s*/i, "");
+
     const postData: Record<string, any> = {
       title,
-      content,
-      status: settings.publishingMode || "draft",
+      content: finalContent,
+      status: settings.publishingMode === "draft" ? "draft" : "publish",
     };
 
     if (excerpt) {

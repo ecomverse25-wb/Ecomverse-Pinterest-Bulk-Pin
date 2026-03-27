@@ -49,20 +49,25 @@ export function generateRecipeSchema(
 ): { schema: RecipeSchema; validations: SchemaValidation[] } {
   const validations: SchemaValidation[] = [];
 
-  // Build schema
+  // Build schema — FIX 7: omit placeholder fields instead of outputting literal placeholders
+  const isPlaceholderImage = !imageUrl || imageUrl === "[Image URL]";
+  const isPlaceholderAuthor = !authorName || authorName === "[Author Name]";
+  const parsedCookTime = toISO8601Duration(recipe.cookTime);
+  const isNoCook = parsedCookTime === "PT0M";
+
   const schema: RecipeSchema = {
     "@context": "https://schema.org/",
     "@type": "Recipe",
     name: recipe.name || articleTitle,
-    image: [imageUrl],
-    author: {
-      "@type": "Person",
-      name: authorName,
-    },
+    // Omit image if placeholder
+    ...(isPlaceholderImage ? {} : { image: [imageUrl] }),
+    // Omit author if placeholder
+    ...(isPlaceholderAuthor ? {} : { author: { "@type": "Person" as const, name: authorName } }),
     datePublished: new Date().toISOString().split("T")[0],
     description: metaDescription || recipe.description || "",
     prepTime: toISO8601Duration(recipe.prepTime),
-    cookTime: toISO8601Duration(recipe.cookTime),
+    // Omit cookTime if PT0M (no-cook/blended recipe)
+    ...(isNoCook ? {} : { cookTime: parsedCookTime }),
     totalTime: toISO8601Duration(recipe.totalTime),
     recipeYield: recipe.servings || "4 servings",
     recipeCategory: "Dinner", // Can be overridden
@@ -99,10 +104,10 @@ export function generateRecipeSchema(
   if (!schema.name) {
     validations.push({ status: "error", message: "Recipe name is required", field: "name" });
   }
-  if (!schema.image[0] || schema.image[0] === "[Image URL]") {
+  if (!schema.image || schema.image.length === 0 || schema.image[0] === "[Image URL]") {
     validations.push({
-      status: "error",
-      message: "At least 1 image URL is required",
+      status: "warning",
+      message: "⚠ Add your featured image URL to the Recipe Schema image field before submitting to Google.",
       field: "image",
     });
   }
@@ -127,10 +132,10 @@ export function generateRecipeSchema(
       field: "prepTime",
     });
   }
-  if (!schema.cookTime || schema.cookTime === "PT0M") {
+  if (!schema.cookTime) {
     validations.push({
-      status: "error",
-      message: "Cook time is required in ISO 8601 format",
+      status: "warning",
+      message: "Cook time omitted (no-cook/blended recipe) — this is acceptable for Google.",
       field: "cookTime",
     });
   }
@@ -223,6 +228,12 @@ export function generateFaqSchema(
 
 // ─── 3.3 Article JSON-LD Generation ───
 
+/** Returns undefined if value is a placeholder like [Author Name] or [Image URL] */
+function cleanField(value: string | undefined): string | undefined {
+  if (!value || (value.includes("[") && value.includes("]"))) return undefined;
+  return value;
+}
+
 export function generateArticleSchema(
   title: string,
   metaDescription: string,
@@ -236,25 +247,41 @@ export function generateArticleSchema(
   const validations: SchemaValidation[] = [];
   const today = new Date().toISOString().split("T")[0];
 
+  const cleanAuthorName = cleanField(authorName);
+  const cleanAuthorUrl = cleanField(authorUrl);
+  const cleanSiteName = cleanField(siteName);
+  const cleanLogoUrl = cleanField(siteLogoUrl);
+  const cleanImage = cleanField(featuredImageUrl);
+
   const schema: ArticleSchema = {
     "@context": "https://schema.org",
     "@type": "Article",
     headline: title,
     description: metaDescription,
-    image: featuredImageUrl,
-    author: {
-      "@type": "Person",
-      name: authorName,
-      url: authorUrl,
-    },
-    publisher: {
-      "@type": "Organization",
-      name: siteName,
-      logo: {
-        "@type": "ImageObject",
-        url: siteLogoUrl,
-      },
-    },
+    // Omit image if placeholder
+    ...(cleanImage ? { image: cleanImage } : {}),
+    // Omit author if name is placeholder
+    ...(cleanAuthorName
+      ? {
+          author: {
+            "@type": "Person" as const,
+            name: cleanAuthorName,
+            ...(cleanAuthorUrl ? { url: cleanAuthorUrl } : {}),
+          },
+        }
+      : {}),
+    // Omit publisher if name is placeholder
+    ...(cleanSiteName
+      ? {
+          publisher: {
+            "@type": "Organization" as const,
+            name: cleanSiteName,
+            ...(cleanLogoUrl
+              ? { logo: { "@type": "ImageObject" as const, url: cleanLogoUrl } }
+              : {}),
+          },
+        }
+      : {}),
     datePublished: today,
     dateModified: today,
     mainEntityOfPage: {
@@ -428,8 +455,8 @@ export function extractRecipeFromContent(content: string): RecipeCard | null {
   const headingMatch = content.match(/<h2[^>]*>([^<]+)<\/h2>\s*(?:<[^>]+>\s*)*?(?:<strong>|\*\*)?Prep Time/i);
   let recipeName = headingMatch ? headingMatch[1].trim() : "";
   if (!recipeName) {
-    const h2s = content.match(/<h2[^>]*>(.*?)<\/h2>/gi) || [];
-    recipeName = h2s.length > 0 ? h2s[h2s.length - 1].replace(/<[^>]*>/g, "").trim() : "";
+    const sectionMatch = content.match(/id="recipe-card"[^>]*>[\s\S]*?<h2[^>]*>([^<]+)<\/h2>/i);
+    if (sectionMatch) recipeName = sectionMatch[1].replace(/<[^>]*>/g, "").trim();
   }
 
   return {

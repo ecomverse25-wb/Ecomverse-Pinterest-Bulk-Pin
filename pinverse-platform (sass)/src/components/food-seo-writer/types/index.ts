@@ -16,6 +16,7 @@ export interface ProviderSettings {
 // ─── Content Types (Section 2.2) ───
 
 export type ContentType =
+  | "auto-detect"
   | "Single Recipe Post"
   | "Recipe Roundup/Listicle"
   | "Meal Prep Guide"
@@ -52,8 +53,8 @@ export type SeasonalOverride =
   | "Holiday Season";
 
 export type LinkAttribute =
-  | 'rel="sponsored noopener"'
-  | 'rel="nofollow noopener"'
+  | "sponsored noopener"
+  | "nofollow noopener"
   | "Custom";
 
 // ─── Pipeline Stages (Section 2.1) ───
@@ -363,6 +364,7 @@ export interface PinterestCopyResult {
   hiddenPins: HiddenPinCopy[];
   ogMetaTags: string;
   dataPinDescriptions: string[];
+  pinImages?: GeneratedImage[];
 }
 
 // ─── Schema Types (Section 3) ───
@@ -371,12 +373,12 @@ export interface RecipeSchema {
   "@context": string;
   "@type": "Recipe";
   name: string;
-  image: string[];
-  author: { "@type": "Person"; name: string };
+  image?: string[];
+  author?: { "@type": "Person"; name: string };
   datePublished: string;
   description: string;
   prepTime: string;
-  cookTime: string;
+  cookTime?: string;
   totalTime: string;
   recipeYield: string;
   recipeCategory: string;
@@ -421,12 +423,12 @@ export interface ArticleSchema {
   "@type": "Article";
   headline: string;
   description: string;
-  image: string;
-  author: { "@type": "Person"; name: string; url: string };
-  publisher: {
+  image?: string;
+  author?: { "@type": "Person"; name: string; url?: string };
+  publisher?: {
     "@type": "Organization";
     name: string;
-    logo: { "@type": "ImageObject"; url: string };
+    logo?: { "@type": "ImageObject"; url: string };
   };
   datePublished: string;
   dateModified: string;
@@ -524,6 +526,7 @@ export interface BulkPinCsvRow {
   board_name: string;
   tobi_text: string;
   image_alt: string;
+  image_url?: string;
 }
 
 // ─── Full Pipeline Result ───

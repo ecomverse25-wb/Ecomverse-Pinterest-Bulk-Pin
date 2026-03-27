@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { PipelineResult } from "./types";
+import type { PipelineResult, FormInputs, ProviderSettings } from "./types";
 import ArticleOutput from "./ArticleOutput";
 import SchemaOutput from "./SchemaOutput";
 import PinterestOutput from "./PinterestOutput";
@@ -13,6 +13,8 @@ interface OutputTabsProps {
   keyword: string;
   onFixIssues: () => void;
   fixing: boolean;
+  inputs: FormInputs;
+  provider: ProviderSettings;
 }
 
 const TABS = [
@@ -27,7 +29,7 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]["key"];
 
-export default function OutputTabs({ result, keyword, onFixIssues, fixing }: OutputTabsProps) {
+export default function OutputTabs({ result, keyword, onFixIssues, fixing, inputs, provider }: OutputTabsProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("article");
 
   return (
@@ -104,7 +106,7 @@ export default function OutputTabs({ result, keyword, onFixIssues, fixing }: Out
           />
         )}
         {activeTab === "pinterest" && (
-          <PinterestOutput pinterest={result.pinterest} />
+          <PinterestOutput pinterest={result.pinterest} keyword={keyword} inputs={inputs} provider={provider} />
         )}
         {activeTab === "seo" && (
           <SeoChecklist seo={result.seo} keyword={keyword} />

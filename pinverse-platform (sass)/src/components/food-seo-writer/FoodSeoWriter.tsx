@@ -16,10 +16,10 @@ const STORAGE_KEY = "food-seo-writer-v2-settings";
 
 const DEFAULT_PROVIDER: ProviderSettings = {
   contentProvider: "gemini",
-  contentModel: "gemini-2.5-flash",
+  contentModel: "gemini-2.5-pro",
   contentApiKey: "",
   imageProvider: "gemini",
-  imageModel: "nano-banana-pro-preview",
+  imageModel: "gemini-3.1-flash-image-preview",
   imageApiKey: "",
   useSharedKey: true,
 };
@@ -84,6 +84,8 @@ export default function FoodSeoWriter() {
     currentBatchIndex,
     startBatch,
     stopBatch,
+    resumeBatch,
+    clearBatch,
     internalGeneration: {
       progress,
       result,
@@ -99,7 +101,15 @@ export default function FoodSeoWriter() {
   // Extra States for Multi-Provider
   const [savedKeys, setSavedKeys] = useState<Record<string, boolean>>({});
   const [testingImage, setTestingImage] = useState(false);
-  const [testImageResult, setTestImageResult] = useState<"success" | "error" | null>(null);
+  const [testImageResult, setTestImageResult] = useState<string | null>(null);
+
+  // --- Toast State ---
+  const [toast, setToast] = useState<{ message: string; type: "error" | "success" } | null>(null);
+
+  const showToast = useCallback((message: string, type: "error" | "success" = "error") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 5000);
+  }, []);
 
   // Load settings from localStorage
   useEffect(() => {
@@ -109,8 +119,19 @@ export default function FoodSeoWriter() {
         const parsed = JSON.parse(saved);
         if (parsed.inputs) setInputs((prev) => ({ ...prev, ...parsed.inputs }));
         if (parsed.provider) {
-          // Merge core provider settings, but overwrite API keys with specific key storage
+          // Merge core provider settings
           const p = { ...DEFAULT_PROVIDER, ...parsed.provider } as ProviderSettings;
+          
+          // Validate models exist in constants, otherwise fallback
+          const validContentModels = CONTENT_MODELS[p.contentProvider] || [];
+          if (!validContentModels.some(m => m.value === p.contentModel)) {
+            p.contentModel = validContentModels[0]?.value || DEFAULT_PROVIDER.contentModel;
+          }
+          const validImageModels = IMAGE_MODELS[p.imageProvider] || [];
+          if (!validImageModels.some(m => m.value === p.imageModel)) {
+            p.imageModel = validImageModels[0]?.value || DEFAULT_PROVIDER.imageModel;
+          }
+
           const contentKey = localStorage.getItem(`pinverse_content_api_key_${p.contentProvider}`);
           if (contentKey) p.contentApiKey = contentKey;
           const imageKey = localStorage.getItem(`pinverse_image_api_key_${p.imageProvider}`);
@@ -162,22 +183,34 @@ export default function FoodSeoWriter() {
     setTestingImage(true);
     setTestImageResult(null);
     try {
-      const { generateImageAction } = await import("@/app/actions/food-seo-writer/generate-v2");
-      const keyStr = provider.useSharedKey && provider.contentProvider === provider.imageProvider ? provider.contentApiKey : provider.imageApiKey;
-      const res = await generateImageAction(
-        "Test Image Cookie", 
-        "A beautiful test image of a fresh chocolate chip cookie on a wooden table, professional food photography", 
-        "Create a stunning high-quality photo of {content}.", // promptTemplate
-        "Food & Kitchen" as any, 
-        "", 
-        "Square 1:1" as any, 
-        provider, // config
-        inputs.imageSettings.imgbbApiKey // imgbbKey
+      const { testImageApiKey } = await import("@/app/actions/food-seo-writer/generate-v2");
+
+      // Resolve the effective API key — use content key when shared
+      const effectiveImageApiKey = provider.useSharedKey && provider.imageProvider === provider.contentProvider
+        ? provider.contentApiKey
+        : provider.imageApiKey;
+
+      if (!effectiveImageApiKey) {
+        setTestImageResult("error:No API key available for " + provider.imageProvider);
+        setTestingImage(false);
+        return;
+      }
+
+      const res = await testImageApiKey(
+        effectiveImageApiKey,
+        provider.imageProvider,
+        provider.imageModel
       );
-      if (res.success) setTestImageResult("success");
-      else setTestImageResult("error");
-    } catch {
-      setTestImageResult("error");
+      if (res.success) {
+        setTestImageResult("success");
+      } else {
+        console.error("Image test error:", res.error);
+        setTestImageResult("error:" + (res.error || "Unknown error"));
+      }
+    } catch (error: unknown) {
+      console.error("Image test error:", error);
+      const msg = error instanceof Error ? error.message : JSON.stringify(error) || "Unknown error";
+      setTestImageResult("error:" + msg);
     } finally {
       setTestingImage(false);
     }
@@ -186,15 +219,31 @@ export default function FoodSeoWriter() {
   // Generate handler
   const handleGenerate = useCallback(() => {
     // Validate keyword
-    const words = inputs.core.mainKeyword.trim().split(/\s+/).filter(Boolean);
-    if (words.length < 2 || words.length > 8) {
-      setKeywordError("Keyword should be 2-8 words.");
+    if (inputs.batch.mode === "batch") {
+      const validKws = inputs.batch.keywords.filter(k => k.trim());
+      if (validKws.length === 0) {
+        setKeywordError("Please enter at least one keyword for batch mode.");
+        showToast("Please enter at least one keyword for batch mode.", "error");
+        return;
+      }
+    } else {
+      const words = inputs.core.mainKeyword.trim().split(/\s+/).filter(Boolean);
+      if (words.length < 2 || words.length > 8) {
+        setKeywordError("Keyword should be 2-8 words.");
+        showToast("Keyword should be 2-8 words.", "error");
+        return;
+      }
+    }
+
+    if (!inputs.core.contentType) {
+      showToast("Please select a content type.", "error");
       return;
     }
 
     // Validate API key
     if (!provider.contentApiKey) {
       setKeywordError(`Please enter your ${provider.contentProvider.toUpperCase()} API key below.`);
+      showToast(`Please enter your ${provider.contentProvider.toUpperCase()} API key.`, "error");
       return;
     }
 
@@ -204,7 +253,7 @@ export default function FoodSeoWriter() {
     } else {
       generate(inputs, provider);
     }
-  }, [inputs, provider, generate, startBatch]);
+  }, [inputs, provider, generate, startBatch, showToast]);
 
   // Fix issues handler
   const handleFixIssues = useCallback(() => {
@@ -218,7 +267,8 @@ export default function FoodSeoWriter() {
   }, [reset, setBatchItems]);
 
   const showResults = inputs.batch.mode === "single" && result !== null;
-  const isBatchActive = inputs.batch.mode === "batch" && batchItems.length > 0;
+  const isBatchActive = batchItems.length > 0;
+  const batchHasCompletedItems = batchItems.some(i => i.status === "completed");
   const showProgress = generating || progress.currentStage !== "input";
   const hideForm = showResults || isBatchActive || generating;
 
@@ -468,10 +518,18 @@ export default function FoodSeoWriter() {
                   {testingImage ? "Testing..." : "🎨 Test"}
                 </button>
                 {testImageResult === "success" && <span style={{ color: "#4ade80", fontSize: 13, fontWeight: 600 }}>✅ Working!</span>}
-                {testImageResult === "error" && <span style={{ color: "#ef4444", fontSize: 13, fontWeight: 600 }}>❌ Error testing API key</span>}
+                {testImageResult && testImageResult.startsWith("error") && <span style={{ color: "#ef4444", fontSize: 13, fontWeight: 600 }}>❌ {testImageResult.replace("error:", "") || "Error testing API key"}</span>}
               </div>
             </div>
           </div>
+
+          {/* Missing Image Key Banner */}
+          {inputs.imageSettings.enabled && !(provider.useSharedKey && provider.imageProvider === provider.contentProvider ? provider.contentApiKey : provider.imageApiKey) && (
+            <div style={{ background: "#ca8a0420", border: "1px solid #ca8a04", color: "#fde047", padding: "12px 16px", borderRadius: 8, marginBottom: 16, fontSize: 13, display: "flex", gap: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 16 }}>⚠</span>
+              Image generation enabled but no API key configured. Images will show as placeholders.
+            </div>
+          )}
 
           {/* Input Form */}
           <InputForm
@@ -491,6 +549,9 @@ export default function FoodSeoWriter() {
           currentIndex={currentBatchIndex}
           isProcessing={isBatchProcessing}
           onStop={stopBatch}
+          onResume={resumeBatch}
+          onClear={clearBatch}
+          currentProgress={isBatchProcessing ? progress : undefined}
         />
       )}
 
@@ -526,11 +587,97 @@ export default function FoodSeoWriter() {
             keyword={inputs.core.mainKeyword}
             onFixIssues={handleFixIssues}
             fixing={fixing}
+            inputs={inputs}
+            provider={provider}
           />
 
           <ExportButtons result={result} keyword={inputs.core.mainKeyword} inputs={inputs} />
         </>
       )}
+
+      {/* ━━━ Batch Results (Batch Mode) ━━━ */}
+      {isBatchActive && batchHasCompletedItems && !isBatchProcessing && (
+        <div style={{ marginTop: 24 }}>
+          <h3 style={{ color: "#f8fafc", fontSize: 16, marginBottom: 16 }}>📋 Batch Results</h3>
+          {batchItems
+            .filter(item => item.status === "completed" && item.result)
+            .map((item, idx) => (
+              <details
+                key={idx}
+                style={{
+                  background: "#1a2035",
+                  border: "1px solid #334155",
+                  borderRadius: 8,
+                  marginBottom: 8,
+                  overflow: "hidden",
+                }}
+              >
+                <summary
+                  style={{
+                    padding: "12px 16px",
+                    cursor: "pointer",
+                    color: "#f8fafc",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <span>✅ {item.keyword}</span>
+                  <span style={{ color: "#4ade80", fontSize: 12, fontWeight: 500 }}>
+                    {item.result!.quality.totalScore}/100 · {item.result!.content.wordCount} words
+                  </span>
+                </summary>
+                <div style={{ padding: "0 16px 16px" }}>
+                  <OutputTabs
+                    result={item.result!}
+                    keyword={item.keyword}
+                    onFixIssues={() => {}}
+                    fixing={false}
+                    inputs={{ ...inputs, core: { ...inputs.core, mainKeyword: item.keyword } }}
+                    provider={provider}
+                  />
+                  <ExportButtons result={item.result!} keyword={item.keyword} inputs={inputs} />
+                </div>
+              </details>
+            ))}
+        </div>
+      )}
+
+      {/* ━━━ Toast Notification ━━━ */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            padding: "16px 24px",
+            background: toast.type === "error" ? "#7f1d1d" : "#065f46",
+            color: toast.type === "error" ? "#fca5a5" : "#6ee7b7",
+            border: `1px solid ${toast.type === "error" ? "#991b1b" : "#059669"}`,
+            borderRadius: 8,
+            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.5)",
+            zIndex: 9999,
+            fontSize: 14,
+            fontWeight: 600,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            animation: "slideIn 0.3s ease-out forwards",
+          }}
+        >
+          {toast.type === "error" ? "❌" : "✅"} {toast.message}
+        </div>
+      )}
+      
+      {/* CSS animation for Toast */}
+      <style>{`
+        @keyframes slideIn {
+          from { transform: translateY(100%); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }

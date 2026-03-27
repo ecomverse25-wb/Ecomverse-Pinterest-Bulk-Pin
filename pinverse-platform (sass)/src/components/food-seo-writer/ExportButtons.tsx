@@ -121,6 +121,7 @@ function exportBulkPinCsv(result: PipelineResult, keyword: string) {
     board_name: result.pinterest.boardSuggestions[0]?.name || keyword,
     tobi_text: result.pinterest.tobiOverlays[i]?.text || "",
     image_alt: `${keyword} - variant ${i + 1}`,
+    image_url: result.pinterest.pinImages?.[i]?.hostedUrl || "",
   }));
 
   const headers = Object.keys(rows[0] || {}).join(",");

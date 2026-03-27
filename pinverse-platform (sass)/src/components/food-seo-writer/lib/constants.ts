@@ -24,14 +24,15 @@ import type {
 
 // ─── Content Type Options (Section 2.2) ───
 
-export const CONTENT_TYPE_OPTIONS: ContentType[] = [
-  "Single Recipe Post",
-  "Recipe Roundup/Listicle",
-  "Meal Prep Guide",
-  "Product Review",
-  "Comparison Post",
-  "Holiday/Seasonal",
-  "Pillar Page",
+export const CONTENT_TYPE_OPTIONS: { value: ContentType; label: string }[] = [
+  { value: "auto-detect", label: "Auto-detect (AI selects based on keyword intent)" },
+  { value: "Single Recipe Post", label: "Single Recipe Post" },
+  { value: "Recipe Roundup/Listicle", label: "Recipe Roundup/Listicle" },
+  { value: "Meal Prep Guide", label: "Meal Prep Guide" },
+  { value: "Product Review", label: "Product Review" },
+  { value: "Comparison Post", label: "Comparison Post" },
+  { value: "Holiday/Seasonal", label: "Holiday/Seasonal" },
+  { value: "Pillar Page", label: "Pillar Page" },
 ];
 
 // ─── Word Count Targets (Section 2.2) ───
@@ -92,8 +93,8 @@ export const SEASONAL_OVERRIDE_OPTIONS: SeasonalOverride[] = [
 // ─── Link Attribute Options (Section 2.2 Group 3) ───
 
 export const LINK_ATTRIBUTE_OPTIONS: LinkAttribute[] = [
-  'rel="sponsored noopener"',
-  'rel="nofollow noopener"',
+  'sponsored noopener',
+  'nofollow noopener',
   "Custom",
 ];
 
@@ -163,7 +164,7 @@ export const PINTEREST_POWER_WORDS = [
 export const DEFAULT_FORM_INPUTS: FormInputs = {
   core: {
     mainKeyword: "",
-    contentType: "Single Recipe Post",
+    contentType: "auto-detect",
     targetSite: "",
     wordCountTarget: "Medium (1500-2500)",
   },
@@ -177,7 +178,7 @@ export const DEFAULT_FORM_INPUTS: FormInputs = {
     productLinks: [],
     productCatalog: [],
     affiliateDisclosure: true,
-    linkAttribute: 'rel="sponsored noopener"',
+    linkAttribute: 'sponsored noopener',
     amazonTag: "",
   },
   pinterest: {
@@ -245,11 +246,11 @@ export const PINTEREST_IMAGE_RATIO = "2:3";
 
 export const CONTENT_MODELS: Record<ContentProvider, { value: string; label: string; description: string }[]> = {
   gemini: [
-    { value: "gemini-3.1-pro", label: "Gemini 3.1 Pro", description: "Most advanced. #1 on benchmarks. Released Feb 19, 2026." },
-    { value: "gemini-3", label: "Gemini 3", description: "Previous flagship with multimodal understanding." },
-    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", description: "Deep reasoning and coding. Excellent for complex tasks." },
-    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash", description: "Best price-performance, fast with reasoning." },
-    { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite", description: "Fastest and most budget-friendly." },
+    { value: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview", description: "Latest. Best reasoning, coding, agentic workflows. Feb 2026." },
+    { value: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview", description: "Most powerful multimodal. Best for vibe-coding. Dec 2025." },
+    { value: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash-Lite Preview", description: "Fastest & cheapest. High-volume tasks. Mar 2026." },
+    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", description: "Stable flagship. Deep reasoning. Best for production." },
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash", description: "Stable. Best price-performance for reasoning tasks." },
   ],
   openai: [
     { value: "gpt-5.4", label: "GPT-5.4", description: "Frontier model. 1M context, computer use, tool search. Released Mar 5, 2026." },
@@ -281,10 +282,8 @@ export const CONTENT_MODELS: Record<ContentProvider, { value: string; label: str
 
 export const IMAGE_MODELS: Record<ImageProvider, { value: string; label: string; description: string }[]> = {
   gemini: [
-    { value: "nano-banana", label: "Nano Banana", description: "Fast, creative image generation." },
-    { value: "nano-banana-pro-preview", label: "Nano Banana Pro \uD83C\uDF4C 4K Studio Quality", description: "Professional 4K studio quality." },
-    { value: "nano-banana-2-preview", label: "Nano Banana 2 Preview", description: "Production-scale. Gemini 3 intelligence." },
-    { value: "imagen-4", label: "Imagen 4", description: "Exceptional clarity up to 2K resolution." },
+    { value: "gemini-3.1-flash-image-preview", label: "Nano Banana 2 (Fast)", description: "High-efficiency image generation. Fast & affordable. Feb 2026." },
+    { value: "gemini-3-pro-image-preview", label: "Nano Banana Pro (Studio)", description: "Studio-quality 4K. Complex layouts, precise text. Nov 2025." },
   ],
   replicate: [
     { value: "ideogram-ai/ideogram-v2-turbo", label: "Ideogram", description: "Excellent text rendering in images." },

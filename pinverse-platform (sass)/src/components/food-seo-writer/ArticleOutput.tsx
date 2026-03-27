@@ -59,6 +59,22 @@ export default function ArticleOutput({ content, keyword }: ArticleOutputProps) 
   const [viewMode, setViewMode] = useState<"preview" | "html">("preview");
   const markdown = htmlToMarkdown(content.articleHtml);
 
+  let displayHtml = content.articleHtml;
+  displayHtml = displayHtml.replace(/!\[([^\]]*)\]\([^)]*placeholder[^)]*\)/gi, (match, altText) => {
+    return `<div class="image-placeholder" style="background:#1e293b; border:2px dashed #475569; padding:40px; text-align:center; color:#94a3b8; border-radius:8px; margin:20px 0;">
+  <span style="font-size:24px;">🖼️</span><br/>
+  <span style="font-weight:bold; margin-top:8px; display:block;">AI image will be generated here</span>
+  <p style="font-size:12px; margin-top:4px;">${altText}</p>
+</div>`;
+  });
+  displayHtml = displayHtml.replace(/<img[^>]*src="[^"]*placeholder[^"]*"[^>]*alt="([^"]*)"[^>]*>/gi, (match, altText) => {
+    return `<div class="image-placeholder" style="background:#1e293b; border:2px dashed #475569; padding:40px; text-align:center; color:#94a3b8; border-radius:8px; margin:20px 0;">
+  <span style="font-size:24px;">🖼️</span><br/>
+  <span style="font-weight:bold; margin-top:8px; display:block;">AI image will be generated here</span>
+  <p style="font-size:12px; margin-top:4px;">${altText}</p>
+</div>`;
+  });
+
   return (
     <div>
       {/* Header with stats and buttons */}
@@ -170,7 +186,7 @@ export default function ArticleOutput({ content, keyword }: ArticleOutputProps) 
               lineHeight: 1.7,
               fontSize: 14,
             }}
-            dangerouslySetInnerHTML={{ __html: content.articleHtml }}
+            dangerouslySetInnerHTML={{ __html: displayHtml }}
           />
         ) : (
           <pre
@@ -182,7 +198,7 @@ export default function ArticleOutput({ content, keyword }: ArticleOutputProps) 
               wordBreak: "break-all",
             }}
           >
-            {content.articleHtml}
+            {displayHtml}
           </pre>
         )}
       </div>

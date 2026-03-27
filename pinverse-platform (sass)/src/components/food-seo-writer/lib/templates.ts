@@ -11,6 +11,13 @@ export interface ContentTemplate {
 }
 
 export const CONTENT_TEMPLATES: Record<ContentType, ContentTemplate> = {
+  "auto-detect": {
+    type: "auto-detect",
+    structure: "AI will automatically detect the best content structure based on the keyword intent.",
+    rules: ["AI determines the best rules to follow based on detected content type."],
+    bestFor: "Keywords where the search intent is mixed or you are unsure what template to use.",
+    promptInstructions: "Auto-detect",
+  },
   "Single Recipe Post": {
     type: "Single Recipe Post",
     structure:

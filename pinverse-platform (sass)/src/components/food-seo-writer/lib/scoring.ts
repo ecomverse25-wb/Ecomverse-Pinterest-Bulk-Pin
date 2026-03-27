@@ -157,7 +157,7 @@ function scoreContentQuality(
 
   // Image placement (2 pts) — Correction 1: reduced from 3 to allow TTR check
   // Bug Fix 4: detect markdown image patterns ![...](...) and HTML <img> tags
-  const imgTagCount = (content.articleHtml.match(/<img\s+[^>]*src=/gi) || []).length;
+  const imgTagCount = (content.articleHtml.match(/<img/gi) || []).length;
   const mdImageCount = (content.articleHtml.match(/!\[[^\]]*\]\([^)]+\)/g) || []).length;
   const imageCount = imgTagCount + mdImageCount;
   const expectedImages = Math.floor(wordCount / 350);
@@ -259,8 +259,13 @@ function scoreSEO(
   });
 
   // Internal/external links (3 pts)
-  const internalLinks = (content.articleHtml.match(/href="(?!https?:\/\/)/gi) || []).length;
-  const externalLinks = (content.articleHtml.match(/href="https?:\/\//gi) || []).length;
+  // Count absolute https links — split into "internal" (links to user's own domain) vs "external" (other domains).
+  // Since we don't know the user's domain here, we count all absolute https links as external,
+  // and only count links that match a known blog pattern (sourcerecipes.info, etc.) as internal.
+  const allAbsoluteLinks = content.articleHtml.match(/href="https?:\/\/[^"]+"/gi) || [];
+  // Internal = links to common food blog patterns the user's WP site would serve
+  const internalLinks = allAbsoluteLinks.filter(l => /sourcerecipes\.info|localhost/i.test(l)).length;
+  const externalLinks = allAbsoluteLinks.length - internalLinks;
   checks.push({
     name: "Internal/external links",
     maxPoints: 3,
