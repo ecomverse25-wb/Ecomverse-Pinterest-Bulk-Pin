@@ -200,6 +200,21 @@ async function handleKeywordsList(niche: string, status?: string, limit = 500): 
   return NextResponse.json({ keywords: kws.slice(0, limit), success: true });
 }
 
+/** Update the keywords_available count on the matching local site */
+async function syncSiteKeywordCount(niche: string): Promise<void> {
+  try {
+    const store = await readKeywords();
+    const kws = store[niche] || [];
+    const available = kws.filter((k) => k.status === "available").length;
+    const sites = await readSites();
+    const idx = sites.findIndex((s) => s.niche_id === niche);
+    if (idx >= 0) {
+      sites[idx].keywords_available = available;
+      await writeSites(sites);
+    }
+  } catch { /* best-effort */ }
+}
+
 async function handleKeywordsUpload(niche: string, body: Record<string, unknown>): Promise<NextResponse> {
   const csvContent = String(body.csv_content || body.csvContent || "");
   const parsed = body.keywords as LocalKeyword[] | undefined;
@@ -237,6 +252,9 @@ async function handleKeywordsUpload(niche: string, body: Record<string, unknown>
   store[niche] = [...existing, ...toAdd];
   await writeKeywords(store);
 
+  // Keep site card in sync
+  await syncSiteKeywordCount(niche);
+
   return NextResponse.json({
     success: true,
     imported: toAdd.length,
@@ -260,6 +278,10 @@ async function handleKeywordsReset(niche: string): Promise<NextResponse> {
   }
   store[niche] = kws;
   await writeKeywords(store);
+
+  // Keep site card in sync
+  await syncSiteKeywordCount(niche);
+
   return NextResponse.json({ success: true, reset: resetCount, message: `Reset ${resetCount} keywords to available` });
 }
 
@@ -589,71 +611,92 @@ async function hermesRequest(
   }
 }
 
-// ─── Sites CRUD helpers (local fallback) ─────────────────────────────────────
+// ─── Sites CRUD helpers (LOCAL-FIRST — always persist locally) ───────────────
+// The local JSON store is the source of truth. VPS data is merged on top when
+// available, but a VPS failure (or VPS returning an empty list) must NEVER hide
+// sites that were successfully saved locally.
 
-async function handleSitesGet(sitesPath: string): Promise<NextResponse> {
-  // Try VPS first
+async function handleSitesGet(_sitesPath: string): Promise<NextResponse> {
+  // Always read local store — this is the source of truth
+  const localSites = await readSites();
+
+  // Optionally merge VPS data (enrich local records, discover VPS-only sites)
   try {
-    const { data, ok, status } = await hermesRequest(sitesPath);
-    if (ok && data?.sites) return NextResponse.json(data);
-    if (status !== 404) return NextResponse.json(data, { status });
-  } catch { /* VPS unreachable — fall through to local store */ }
+    const { data, ok } = await hermesRequest("/sites");
+    if (ok && Array.isArray(data?.sites) && data.sites.length > 0) {
+      const localById = new Map(localSites.map((s) => [s.niche_id, s]));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const vpsSite of data.sites as any[]) {
+        const nid = vpsSite.niche_id || vpsSite.id;
+        if (!localById.has(nid)) {
+          // VPS-only site — add to local for persistence
+          localSites.push({
+            id: String(vpsSite.id || nid),
+            niche_id: String(nid),
+            name: String(vpsSite.name || vpsSite.display_name || nid),
+            display_name: String(vpsSite.display_name || vpsSite.name || nid),
+            url: String(vpsSite.url || vpsSite.site_url || ""),
+            wp_username: String(vpsSite.wp_username || ""),
+            wp_app_password: "",
+            wp_connected: Boolean(vpsSite.wp_connected),
+            affiliate_programs: [],
+            ad_network: "None",
+            tone: "warm-conversational",
+            content_types: [],
+            keywords_available: vpsSite.keywords_available ?? 0,
+            articles_total: vpsSite.articles_total ?? 0,
+            status: "active",
+            created_at: vpsSite.created_at || new Date().toISOString(),
+          });
+        } else {
+          // Enrich local record with live VPS stats
+          const local = localById.get(nid)!;
+          if (vpsSite.wp_connected !== undefined) local.wp_connected = vpsSite.wp_connected;
+          if (typeof vpsSite.articles_total === "number") local.articles_total = vpsSite.articles_total;
+        }
+      }
+      await writeSites(localSites);
+    }
+  } catch { /* VPS unreachable — local store is authoritative */ }
 
-  // Fallback: local store
-  const sites = await readSites();
-  return NextResponse.json({ sites });
+  return NextResponse.json({ sites: localSites });
 }
 
 async function handleSitesPost(body: Record<string, unknown>): Promise<NextResponse> {
-  // Try VPS first
-  try {
-    const { data, ok, status } = await hermesRequest("/sites", "POST", body);
-    if (ok) {
-      // Also save locally for consistency
-      const sites = await readSites();
-      const exists = sites.find((s) => s.niche_id === body.niche_id);
-      if (!exists) {
-        sites.push(bodyToSite(body));
-        await writeSites(sites);
-      }
-      return NextResponse.json(data);
-    }
-    if (status !== 404) return NextResponse.json(data, { status });
-  } catch { /* VPS unreachable — fall through to local store */ }
-
-  // Fallback: local store
-  const sites = await readSites();
   const nicheId = String(body.niche_id || "").trim();
   if (!nicheId) {
     return NextResponse.json({ error: "niche_id is required", success: false }, { status: 400 });
   }
+
+  // ① Always save locally first
+  const sites = await readSites();
   if (sites.find((s) => s.niche_id === nicheId)) {
     return NextResponse.json({ error: `Site "${nicheId}" already exists`, success: false }, { status: 409 });
   }
   sites.push(bodyToSite(body));
   await writeSites(sites);
+
+  // ② Best-effort sync to VPS
+  try {
+    await hermesRequest("/sites", "POST", body);
+  } catch { /* non-blocking */ }
+
   return NextResponse.json({ success: true, message: `Site "${nicheId}" added` });
 }
 
 async function handleSitesDelete(nicheId: string): Promise<NextResponse> {
-  // Try VPS first
-  try {
-    const { data, ok, status } = await hermesRequest(`/sites/${nicheId}`, "DELETE");
-    if (ok) {
-      // Also remove locally
-      const local = await readSites();
-      await writeSites(local.filter((s) => s.niche_id !== nicheId));
-      return NextResponse.json(data);
-    }
-    if (status !== 404) return NextResponse.json(data, { status });
-  } catch { /* VPS unreachable — fall through */ }
-
-  // Fallback: local store
+  // ① Always delete from local store first
   const sites = await readSites();
   const before = sites.length;
-  const after = sites.filter((s) => s.niche_id !== nicheId);
-  await writeSites(after);
-  if (after.length < before) {
+  const filtered = sites.filter((s) => s.niche_id !== nicheId);
+  await writeSites(filtered);
+
+  // ② Best-effort sync to VPS
+  try {
+    await hermesRequest(`/sites/${nicheId}`, "DELETE");
+  } catch { /* non-blocking */ }
+
+  if (filtered.length < before) {
     return NextResponse.json({ success: true, message: `Site "${nicheId}" removed` });
   }
   return NextResponse.json({ success: true, message: `Site "${nicheId}" not found but treated as deleted` });

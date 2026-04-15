@@ -37,7 +37,7 @@ yarn-error.log*
 .vercel
 
 # hermes local store (contains credentials)
-.hermes-sites.json
+.hermes-*.json
 
 # typescript
 *.tsbuildinfo
