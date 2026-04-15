@@ -11,6 +11,9 @@ const ADMIN_EMAIL = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "";
 // Sites are stored in a JSON file so they survive restarts.
 const SITES_FILE = path.join(process.cwd(), ".hermes-sites.json");
 const KEYWORDS_FILE = path.join(process.cwd(), ".hermes-keywords.json");
+const SETTINGS_FILE = path.join(process.cwd(), ".hermes-settings.json");
+const BUDGET_FILE = path.join(process.cwd(), ".hermes-budget.json");
+const SCHEDULE_FILE = path.join(process.cwd(), ".hermes-schedule.json");
 
 interface LocalSite {
   id: string;
@@ -356,6 +359,181 @@ async function handleProductsClear(niche: string): Promise<NextResponse> {
   return NextResponse.json({ success: true, cleared: count, message: `Cleared ${count} products for ${niche}` });
 }
 
+// ─── Local Settings Store (quality settings persist across refreshes) ────────
+
+interface LocalSettings {
+  min_quality_score: number;
+  min_word_count: number;
+  max_images: number;
+  max_product_links: number;
+  updated_at: string;
+}
+
+const DEFAULT_SETTINGS: LocalSettings = {
+  min_quality_score: 75,
+  min_word_count: 1500,
+  max_images: 5,
+  max_product_links: 3,
+  updated_at: "",
+};
+
+async function readSettings(): Promise<LocalSettings> {
+  try {
+    const raw = await fs.readFile(SETTINGS_FILE, "utf-8");
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+async function writeSettings(settings: LocalSettings): Promise<void> {
+  await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
+}
+
+async function handleSettingsGet(): Promise<NextResponse> {
+  const settings = await readSettings();
+  return NextResponse.json({ ...settings, success: true });
+}
+
+async function handleSettingsPost(body: Record<string, unknown>): Promise<NextResponse> {
+  const current = await readSettings();
+  const updated: LocalSettings = {
+    min_quality_score: typeof body.min_quality_score === "number" ? body.min_quality_score : current.min_quality_score,
+    min_word_count: typeof body.min_word_count === "number" ? body.min_word_count : current.min_word_count,
+    max_images: typeof body.max_images === "number" ? body.max_images : current.max_images,
+    max_product_links: typeof body.max_product_links === "number" ? body.max_product_links : current.max_product_links,
+    updated_at: new Date().toISOString(),
+  };
+  await writeSettings(updated);
+  return NextResponse.json({ ...updated, success: true });
+}
+
+// ─── Local Budget Store (budget persists across refreshes) ───────────────────
+
+interface LocalBudget {
+  daily_limit: number;
+  monthly_limit: number;
+  spent_today: number;
+  spent_this_month: number;
+  monthly_percent: number;
+  content_calls_today: number;
+  content_calls_limit: number;
+  images_today: number;
+  images_limit: number;
+  history: { date: string; amount: number; articles: number }[];
+  updated_at: string;
+}
+
+const DEFAULT_BUDGET: LocalBudget = {
+  daily_limit: 8.33,
+  monthly_limit: 250,
+  spent_today: 0,
+  spent_this_month: 0,
+  monthly_percent: 0,
+  content_calls_today: 0,
+  content_calls_limit: 250,
+  images_today: 0,
+  images_limit: 1000,
+  history: [],
+  updated_at: "",
+};
+
+async function readBudget(): Promise<LocalBudget> {
+  try {
+    const raw = await fs.readFile(BUDGET_FILE, "utf-8");
+    return { ...DEFAULT_BUDGET, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_BUDGET };
+  }
+}
+
+async function writeBudget(budget: LocalBudget): Promise<void> {
+  await fs.writeFile(BUDGET_FILE, JSON.stringify(budget, null, 2), "utf-8");
+}
+
+async function handleBudgetGet(): Promise<NextResponse> {
+  const budget = await readBudget();
+  return NextResponse.json({ ...budget, success: true });
+}
+
+async function handleBudgetPost(body: Record<string, unknown>): Promise<NextResponse> {
+  const current = await readBudget();
+  if (typeof body.monthly_limit === "number") {
+    current.monthly_limit = body.monthly_limit;
+    current.daily_limit = body.monthly_limit / 30;
+  }
+  if (typeof body.daily_limit === "number") {
+    current.daily_limit = body.daily_limit;
+  }
+  current.updated_at = new Date().toISOString();
+  await writeBudget(current);
+  return NextResponse.json({ ...current, success: true });
+}
+
+// ─── Local Schedule Store (schedule persists across refreshes) ───────────────
+
+interface LocalScheduleJob {
+  niche: string;
+  time: string;
+  count: number;
+  enabled: boolean;
+  last_run: string;
+  next_run: string;
+}
+
+async function readSchedule(): Promise<LocalScheduleJob[]> {
+  try {
+    const raw = await fs.readFile(SCHEDULE_FILE, "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+async function writeSchedule(jobs: LocalScheduleJob[]): Promise<void> {
+  await fs.writeFile(SCHEDULE_FILE, JSON.stringify(jobs, null, 2), "utf-8");
+}
+
+async function handleScheduleGet(): Promise<NextResponse> {
+  const jobs = await readSchedule();
+  return NextResponse.json({ jobs, success: true });
+}
+
+async function handleSchedulePost(body: Record<string, unknown>): Promise<NextResponse> {
+  const jobs = await readSchedule();
+  const niche = String(body.niche || "");
+  if (!niche) {
+    return NextResponse.json({ error: "niche is required", success: false }, { status: 400 });
+  }
+
+  const existing = jobs.findIndex((j) => j.niche === niche);
+  const job: LocalScheduleJob = {
+    niche,
+    time: String(body.time || "06:00"),
+    count: typeof body.count === "number" ? body.count : 1,
+    enabled: body.enabled !== false,
+    last_run: existing >= 0 ? jobs[existing].last_run : "",
+    next_run: "",
+  };
+
+  // Calculate next run time
+  const [hours, minutes] = job.time.split(":").map(Number);
+  const now = new Date();
+  const next = new Date(now);
+  next.setHours(hours, minutes, 0, 0);
+  if (next <= now) next.setDate(next.getDate() + 1);
+  job.next_run = job.enabled ? next.toISOString() : "";
+
+  if (existing >= 0) {
+    jobs[existing] = job;
+  } else {
+    jobs.push(job);
+  }
+
+  await writeSchedule(jobs);
+  return NextResponse.json({ ...job, success: true });
+}
+
 // Verify the current user is an admin before proxying any request
 async function verifyAdmin(): Promise<boolean> {
   try {
@@ -552,10 +730,13 @@ export async function GET(req: NextRequest) {
         return handleSitesGet(reqPath);
       }
       if (reqPath.startsWith("/schedule")) {
-        return NextResponse.json({ jobs: [] });
+        return handleScheduleGet();
       }
       if (reqPath.startsWith("/budget")) {
-        return NextResponse.json({ daily_limit: 10, monthly_limit: 300, spent_today: 0, spent_this_month: 0 });
+        return handleBudgetGet();
+      }
+      if (reqPath.startsWith("/settings")) {
+        return handleSettingsGet();
       }
       // Keywords list — local fallback
       if (kwListMatch) {
@@ -629,6 +810,36 @@ export async function POST(req: NextRequest) {
     // Sites: use local-backed handler
     if (reqPath === "/sites" || reqPath === "/sites/") {
       return handleSitesPost(body || {});
+    }
+
+    // Settings
+    if (reqPath === "/settings" || reqPath === "/settings/") {
+      try {
+        const { data, ok, status } = await hermesRequest(reqPath, "POST", body);
+        if (ok && data?.success) return NextResponse.json(data);
+        if (status !== 403 && status !== 404) return NextResponse.json(data, { status });
+      } catch { /* fall through */ }
+      return handleSettingsPost(body || {});
+    }
+
+    // Budget
+    if (reqPath === "/budget" || reqPath === "/budget/") {
+      try {
+        const { data, ok, status } = await hermesRequest(reqPath, "POST", body);
+        if (ok && data?.success) return NextResponse.json(data);
+        if (status !== 403 && status !== 404) return NextResponse.json(data, { status });
+      } catch { /* fall through */ }
+      return handleBudgetPost(body || {});
+    }
+
+    // Schedule
+    if (reqPath === "/schedule" || reqPath === "/schedule/") {
+      try {
+        const { data, ok, status } = await hermesRequest(reqPath, "POST", body);
+        if (ok && data?.success) return NextResponse.json(data);
+        if (status !== 403 && status !== 404) return NextResponse.json(data, { status });
+      } catch { /* fall through */ }
+      return handleSchedulePost(body || {});
     }
 
     // Test connection — special handling
