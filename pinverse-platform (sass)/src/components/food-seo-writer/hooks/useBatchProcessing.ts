@@ -28,6 +28,7 @@ export function useBatchProcessing() {
   const {
     progress,
     result,
+    setResult,
     generating,
     generate,
     reset,
@@ -250,6 +251,6 @@ export function useBatchProcessing() {
     stopBatch,
     resumeBatch,
     clearBatch,
-    internalGeneration: { progress, result, generating, generate, reset, abort, fixing, fixIssues },
+    internalGeneration: { progress, result, setResult, generating, generate, reset, abort, fixing, fixIssues },
   };
 }

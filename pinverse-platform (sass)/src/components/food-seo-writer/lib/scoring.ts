@@ -179,8 +179,48 @@ function scoreContentQuality(
     issue: brokenSentences.length > 0 ? `Found ${brokenSentences.length} potentially broken sentences` : undefined,
   });
 
+  // Title-Content Count Match (1 pt) — for listicle/roundup posts
+  const titleNumMatch = content.title.match(/(\d+)/);
+  let titleNum = titleNumMatch ? parseInt(titleNumMatch[1], 10) : 0;
+  if (titleNum > 15) titleNum = 15; // Cap at 15 to match generation rules
+  
+  const isListicle = inputs.core.contentType === "Recipe Roundup/Listicle" || inputs.core.contentType === "Holiday/Seasonal";
+  const contentH2s = getH2s(content.articleHtml);
+  // Filter out non-recipe H2s (FAQ, intro, conclusion, tips, shopping lists, etc.)
+  const recipeH2s = contentH2s.filter(h => !/faq|frequently asked|conclusion|introduction|planning|shopping list|tips|storage|why these|related|nutrition note/i.test(h));
+  if (isListicle && titleNum >= 5) {
+    const countMatch = recipeH2s.length >= titleNum;
+    checks.push({
+      name: "Title-Content count match",
+      maxPoints: 1,
+      earnedPoints: countMatch ? 1 : 0,
+      criteria: `Title promises ${titleNum} items. Found ${recipeH2s.length} recipe H2 sections.`,
+      issue: !countMatch ? `Title says "${titleNum}" but article has only ${recipeH2s.length} recipe sections. Content must match the title promise.` : undefined,
+      fixSuggestion: !countMatch ? `Add ${titleNum - recipeH2s.length} more recipe H2 sections to match the title.` : undefined,
+    });
+  } else {
+    checks.push({
+      name: "Title-Content count match",
+      maxPoints: 1,
+      earnedPoints: 1,
+      criteria: "N/A (not a numbered listicle)",
+    });
+  }
+
+  // Missing/Placeholder images (1 pt)
+  const placeholderCount = (content.articleHtml.match(/src=["']image-placeholder["']/gi) || []).length
+    + (content.articleHtml.match(/class="image-placeholder"/gi) || []).length;
+  checks.push({
+    name: "Image generation completeness",
+    maxPoints: 1,
+    earnedPoints: placeholderCount === 0 ? 1 : 0,
+    criteria: `${placeholderCount} unreplaced image placeholder(s) found`,
+    issue: placeholderCount > 0 ? `${placeholderCount} images are still placeholders. Use the "Regenerate Image" buttons to generate real images.` : undefined,
+    fixSuggestion: placeholderCount > 0 ? "Click 'Regenerate All Missing Images' in the article preview tab." : undefined,
+  });
+
   const totalEarned = checks.reduce((sum, c) => sum + c.earnedPoints, 0);
-  return { name: "Content Quality", maxPoints: 24, earnedPoints: totalEarned, checks };
+  return { name: "Content Quality", maxPoints: 26, earnedPoints: totalEarned, checks };
 }
 
 // ─── Category 2: SEO (25 Points) ───

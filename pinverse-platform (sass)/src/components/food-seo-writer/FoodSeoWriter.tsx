@@ -89,6 +89,7 @@ export default function FoodSeoWriter() {
     internalGeneration: {
       progress,
       result,
+      setResult,
       generating,
       fixing,
       generate,
@@ -103,8 +104,9 @@ export default function FoodSeoWriter() {
   const [testingImage, setTestingImage] = useState(false);
   const [testImageResult, setTestImageResult] = useState<string | null>(null);
 
-  // --- Toast State ---
+  // --- Toast & Batch Fix States ---
   const [toast, setToast] = useState<{ message: string; type: "error" | "success" } | null>(null);
+  const [fixingBatchItemId, setFixingBatchItemId] = useState<string | null>(null);
 
   const showToast = useCallback((message: string, type: "error" | "success" = "error") => {
     setToast({ message, type });
@@ -265,6 +267,36 @@ export default function FoodSeoWriter() {
     reset();
     setBatchItems([]);
   }, [reset, setBatchItems]);
+
+  // Content update handler (for image regeneration in ArticleOutput)
+  const handleContentUpdate = useCallback((updatedHtml: string) => {
+    if (!result) return;
+    const wordCount = updatedHtml.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length;
+    const newResult = {
+      ...result,
+      content: {
+        ...result.content,
+        articleHtml: updatedHtml,
+        wordCount,
+      },
+    };
+    // Update featured image in article schema if available
+    const featuredImgMatch = updatedHtml.match(
+      /<figure[^>]*class=["'][^"']*featured-image[^"']*["'][^>]*>[\s\S]*?<img[^>]*src=["']([^"']+)["']/i
+    );
+    if (featuredImgMatch?.[1] && !featuredImgMatch[1].includes('placeholder')) {
+      if (newResult.schemas.articleSchema) {
+        newResult.schemas = {
+          ...newResult.schemas,
+          articleSchema: {
+            ...newResult.schemas.articleSchema,
+            image: featuredImgMatch[1],
+          },
+        };
+      }
+    }
+    setResult(newResult);
+  }, [result, setResult]);
 
   const showResults = inputs.batch.mode === "single" && result !== null;
   const isBatchActive = batchItems.length > 0;
@@ -589,6 +621,7 @@ export default function FoodSeoWriter() {
             fixing={fixing}
             inputs={inputs}
             provider={provider}
+            onContentUpdate={handleContentUpdate}
           />
 
           <ExportButtons result={result} keyword={inputs.core.mainKeyword} inputs={inputs} />
@@ -633,10 +666,40 @@ export default function FoodSeoWriter() {
                   <OutputTabs
                     result={item.result!}
                     keyword={item.keyword}
-                    onFixIssues={() => {}}
-                    fixing={false}
+                    onFixIssues={async () => {
+                      if (fixingBatchItemId) return;
+                      setFixingBatchItemId(item.keyword);
+                      
+                      // Run the fix issue pipeline using this specific batch item's result
+                      const updatedResult = await fixIssues(
+                        { ...inputs, core: { ...inputs.core, mainKeyword: item.keyword } },
+                        provider,
+                        item.result!
+                      );
+                      
+                      // Update the specific item in the batch array
+                      if (updatedResult) {
+                        setBatchItems(prev => prev.map(bi =>
+                          bi.keyword === item.keyword ? { ...bi, result: updatedResult } : bi
+                        ));
+                        setToast({ message: "Issues fixed successfully!", type: "success" });
+                      } else {
+                        setToast({ message: "Failed to fix some issues. Check logs if available.", type: "error" });
+                      }
+                      
+                      setFixingBatchItemId(null);
+                    }}
+                    fixing={fixingBatchItemId === item.keyword}
                     inputs={{ ...inputs, core: { ...inputs.core, mainKeyword: item.keyword } }}
                     provider={provider}
+                    onContentUpdate={(updatedHtml) => {
+                      // Update the batch item's content inline
+                      setBatchItems(prev => prev.map(bi =>
+                        bi.keyword === item.keyword && bi.result
+                          ? { ...bi, result: { ...bi.result, content: { ...bi.result.content, articleHtml: updatedHtml } } }
+                          : bi
+                      ));
+                    }}
                   />
                   <ExportButtons result={item.result!} keyword={item.keyword} inputs={inputs} />
                 </div>

@@ -15,6 +15,7 @@ interface OutputTabsProps {
   fixing: boolean;
   inputs: FormInputs;
   provider: ProviderSettings;
+  onContentUpdate?: (updatedHtml: string) => void;
 }
 
 const TABS = [
@@ -29,7 +30,7 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]["key"];
 
-export default function OutputTabs({ result, keyword, onFixIssues, fixing, inputs, provider }: OutputTabsProps) {
+export default function OutputTabs({ result, keyword, onFixIssues, fixing, inputs, provider, onContentUpdate }: OutputTabsProps) {
   const [activeTab, setActiveTab] = useState<TabKey>("article");
 
   return (
@@ -82,7 +83,7 @@ export default function OutputTabs({ result, keyword, onFixIssues, fixing, input
         }}
       >
         {activeTab === "article" && (
-          <ArticleOutput content={result.content} keyword={keyword} />
+          <ArticleOutput content={result.content} keyword={keyword} inputs={inputs} provider={provider} onContentUpdate={onContentUpdate} />
         )}
         {activeTab === "recipe-schema" && (
           <SchemaOutput

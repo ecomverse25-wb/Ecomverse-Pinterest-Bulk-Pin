@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, Wrench, Settings, CreditCard, LogOut, Menu, X, Sun, Moon, Shield, FileText } from "lucide-react";
+import { LayoutDashboard, Wrench, Settings, CreditCard, LogOut, Menu, X, Sun, Moon, Shield, FileText, Zap } from "lucide-react";
 import { useState, useEffect } from "react";
 import { getUser, signOut } from "@/lib/supabase";
 import { isAdmin } from "@/lib/admin";
@@ -133,6 +133,20 @@ export default function DashboardLayout({
                         >
                             <Shield className="w-5 h-5" />
                             Admin Panel
+                        </Link>
+                    )}
+                    {/* Hermes Control Center - Only visible to admins */}
+                    {isAdmin(user?.email) && (
+                        <Link
+                            href="/dashboard/hermes"
+                            className={`flex items-center gap-3 px-4 py-3 mb-2 rounded-lg transition border ${
+                                pathname === "/dashboard/hermes"
+                                    ? "text-yellow-400 bg-yellow-400/10 border-yellow-400/30"
+                                    : "text-slate-400 hover:bg-slate-800 hover:text-white border-transparent"
+                            }`}
+                        >
+                            <Zap className="w-5 h-5" />
+                            Hermes
                         </Link>
                     )}
                     <button
