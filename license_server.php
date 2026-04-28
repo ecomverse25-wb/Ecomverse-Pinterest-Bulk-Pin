@@ -4,7 +4,8 @@
  * 
  * 1. Upload this file to your Hostinger subdomain (e.g., public_html/license/license_server.php).
  * 2. It will automatically create 'licenses.db' in the same folder.
- * 3. Change the ADMIN_PASSWORD below to something secure!
+ * 3. Set ADMIN_PASSWORD as a server environment variable (e.g., via Hostinger PHP env config).
+ *    NEVER hardcode the password directly in this file.
  */
 
 header("Access-Control-Allow-Origin: *");
@@ -13,8 +14,17 @@ header("Access-Control-Allow-Headers: Content-Type, x-admin-password");
 header("Content-Type: application/json");
 
 // --- CONFIGURATION ---
-// CHANGE THIS PASSWORD BEFORE DEPLOYING!
-$ADMIN_PASSWORD = '$Winwin$0127870735$win$';
+// Read password from server environment variable for security.
+// Set this on Hostinger via: putenv('LICENSE_ADMIN_PASSWORD=your_secure_password')
+// or configure it in your hosting panel's PHP environment settings.
+$ADMIN_PASSWORD = getenv('LICENSE_ADMIN_PASSWORD');
+
+if (empty($ADMIN_PASSWORD)) {
+    http_response_code(500);
+    echo json_encode(["error" => "Server misconfiguration: LICENSE_ADMIN_PASSWORD environment variable is not set."]);
+    exit;
+}
+
 $DB_FILE = __DIR__ . '/licenses.db';
 
 // --- DATABASE INIT ---

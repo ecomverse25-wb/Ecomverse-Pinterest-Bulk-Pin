@@ -1,0 +1,39 @@
+name: Dependency Security Audit
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 3 * * 1'  # Every Monday at 3 AM UTC
+
+jobs:
+  audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install root dependencies
+        run: npm install --ignore-scripts
+
+      - name: Run npm audit (root)
+        run: npm audit --audit-level=moderate
+        continue-on-error: false
+
+      - name: Install APP Resources CODE (hostinger) dependencies
+        working-directory: 'APP Resources CODE (hostinger)'
+        run: npm install --ignore-scripts
+        continue-on-error: true
+
+      - name: Run npm audit (APP Resources CODE)
+        working-directory: 'APP Resources CODE (hostinger)'
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
