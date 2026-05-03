@@ -58,8 +58,11 @@ export default function SitesPage() {
 
   const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
 
-  const showToast = useCallback((type: 'success' | 'error', msg: string) => {
-    setToast({ type, msg }); setTimeout(() => setToast(null), 5000)
+  const showToast = useCallback((type: 'success' | 'error', msg: any) => {
+    let safeMsg = 'Unknown error'
+    if (typeof msg === 'string') safeMsg = msg
+    else if (msg && typeof msg === 'object') safeMsg = msg.message || msg.msg || msg.error || JSON.stringify(msg)
+    setToast({ type, msg: String(safeMsg) }); setTimeout(() => setToast(null), 5000)
   }, [])
 
   const loadSites = useCallback(async () => {
