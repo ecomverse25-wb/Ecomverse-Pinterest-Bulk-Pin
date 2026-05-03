@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "postinstall": "npm install --prefix \"pinverse-platform (sass)\"",
     "dev": "npm run dev --prefix \"pinverse-platform (sass)\" -- --webpack",
     "build": "npm run build --prefix \"pinverse-platform (sass)\"",
     "start": "npm run start --prefix \"pinverse-platform (sass)\""
