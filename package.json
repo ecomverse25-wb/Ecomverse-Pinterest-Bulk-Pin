@@ -1,8 +1,8 @@
 {
   "scripts": {
-    "postinstall": "npm install --prefix \"pinverse-platform (sass)\"",
+    "postinstall": "npm install --legacy-peer-deps --prefix \"pinverse-platform (sass)\"",
     "dev": "npm run dev --prefix \"pinverse-platform (sass)\" -- --webpack",
-    "build": "npm run build --prefix \"pinverse-platform (sass)\"",
+    "build": "npm run build --prefix \"pinverse-platform (sass)\" && node -e \"const fs=require('fs'),p=require('path');const s=p.join('pinverse-platform (sass)','.next');if(fs.existsSync('.next'))fs.rmSync('.next',{recursive:true});fs.cpSync(s,'.next',{recursive:true});console.log('Copied .next to root')\"",
     "start": "npm run start --prefix \"pinverse-platform (sass)\""
   },
   "dependencies": {
