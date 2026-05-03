@@ -7,8 +7,6 @@ import {
   hermesPost,
   hermesDelete,
   formatNumber,
-  type Site,
-  type KeywordItem,
 } from "@/components/hermes/utils";
 
 function Spinner({ className = "" }: { className?: string }) {
@@ -139,6 +137,11 @@ function parseCsv(csvText: string): {
       continue;
     }
 
+    if (searchVolume < 100) {
+      errors.push(`Line ${i + 1}: search volume ${searchVolume} < 100, skipped`);
+      continue;
+    }
+
     const normalizedKey = keyword.toLowerCase();
     if (seen.has(normalizedKey)) {
       continue; // Skip duplicates silently
@@ -160,10 +163,12 @@ function parseCsv(csvText: string): {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function KeywordsPage() {
-  const [sites, setSites] = useState<Site[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [sites, setSites] = useState<any[]>([]);
   const [selectedNiche, setSelectedNiche] = useState("");
   const [kwStats, setKwStats] = useState<{ available: number; used: number; total: number } | null>(null);
-  const [keywords, setKeywords] = useState<KeywordItem[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [keywords, setKeywords] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [kwLoading, setKwLoading] = useState(false);
 
@@ -186,6 +191,12 @@ export default function KeywordsPage() {
   // Reset modal
   const [showResetModal, setShowResetModal] = useState(false);
   const [resetting, setResetting] = useState(false);
+
+  // Individual keyword delete (Missing #1)
+  const [deletingKwId, setDeletingKwId] = useState<string | null>(null);
+  const [selectAll, setSelectAll] = useState(false);
+  const [selectedKws, setSelectedKws] = useState<Set<string>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Feedback
   const [message, setMessage] = useState("");
@@ -211,7 +222,8 @@ export default function KeywordsPage() {
   // Load sites
   useEffect(() => {
     (async () => {
-      const res = await hermesGet("/sites");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await hermesGet<any>("/sites");
       if (res?.error) {
         setError(res.error);
       } else {
@@ -230,7 +242,8 @@ export default function KeywordsPage() {
   const loadKeywords = useCallback(async () => {
     if (!selectedNiche) return;
     setKwLoading(true);
-    const [statsRes, listRes] = await Promise.allSettled([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [statsRes, listRes] = await Promise.allSettled<any>([
       hermesGet(`/keywords/${selectedNiche}`),
       hermesGet(`/keywords/${selectedNiche}/list?limit=500${statusFilter === "all" ? "" : `&status=${statusFilter}`}`),
     ]);
@@ -269,8 +282,10 @@ export default function KeywordsPage() {
 
     setUploading(true);
     try {
-      const res = await hermesPost(`/keywords/${selectedNiche}/upload`, {
-        csv_content: csvText,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await hermesPost<any>(`/keywords/${selectedNiche}/upload`, {
+        csv_content: typeof window !== 'undefined' ? btoa(unescape(encodeURIComponent(csvText))) : Buffer.from(csvText).toString('base64'),
+        is_base64: true,
         keywords: parsed.keywords,
         filename: `keywords_${selectedNiche}_${Date.now()}.csv`,
         format: parsed.format,
@@ -298,7 +313,8 @@ export default function KeywordsPage() {
   const handleReset = async () => {
     setResetting(true);
     try {
-      const res = await hermesDelete(`/keywords/${selectedNiche}/reset`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await hermesDelete<any>(`/keywords/${selectedNiche}/reset`);
       if (res.success) {
         setMessage(`Keywords for ${selectedNiche} reset to available`);
         loadKeywords();
@@ -311,6 +327,45 @@ export default function KeywordsPage() {
       setShowResetModal(false);
       setResetting(false);
     }
+  };
+
+  // Missing #1: Delete individual keyword
+  const deleteKeyword = async (kwId: string) => {
+    if (!confirm('Remove this keyword? It cannot be undone.')) return;
+    setDeletingKwId(kwId);
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await hermesDelete<any>(`/keywords/${selectedNiche}/${kwId}`);
+      if (res.success || !res.error) {
+        setMessage('Keyword removed');
+        setKeywords(prev => prev.filter(k => k.id !== kwId));
+        if (kwStats) setKwStats({ ...kwStats, available: Math.max(0, kwStats.available - 1), total: Math.max(0, kwStats.total - 1) });
+        setSelectedKws(prev => { const n = new Set(prev); n.delete(kwId); return n; });
+      } else { setError(res.error || 'Delete failed'); }
+    } catch (err) { setError(`Delete failed: ${err instanceof Error ? err.message : String(err)}`); }
+    finally { setDeletingKwId(null); }
+  };
+
+  // Missing #1: Bulk delete selected keywords
+  const bulkDelete = async () => {
+    if (selectedKws.size === 0) return;
+    if (!confirm(`Delete ${selectedKws.size} selected keywords? This cannot be undone.`)) return;
+    setBulkDeleting(true);
+    let deleted = 0;
+    for (const kwId of selectedKws) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res = await hermesDelete<any>(`/keywords/${selectedNiche}/${kwId}`);
+        if (res.success || !res.error) {
+          deleted++;
+          setKeywords(prev => prev.filter(k => k.id !== kwId));
+        }
+      } catch { /* continue */ }
+    }
+    if (kwStats) setKwStats({ ...kwStats, available: Math.max(0, kwStats.available - deleted), total: Math.max(0, kwStats.total - deleted) });
+    setSelectedKws(new Set()); setSelectAll(false);
+    setMessage(`Removed ${deleted} keywords`);
+    setBulkDeleting(false);
   };
 
   // File handlers
@@ -566,26 +621,42 @@ export default function KeywordsPage() {
             <Spinner className="text-yellow-400" /><span className="ml-3 text-gray-400 text-sm">Loading keywords…</span>
           </div>
         ) : displayedKw.length === 0 ? (
-          <p className="text-gray-500 text-sm py-6 text-center">No keywords found.</p>
+          <p className="text-gray-500 text-sm py-6 text-center">
+            No keywords found.
+            {kwStats && kwStats.total === 0 && (
+              <span className="block mt-2 text-gray-400">No keywords yet — upload a CSV above to get started ↑</span>
+            )}
+          </p>
         ) : (
           <>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800">
+                    <th className="text-left pb-2 font-medium w-8">
+                      <input type="checkbox" checked={selectAll}
+                        onChange={e => { setSelectAll(e.target.checked); if (e.target.checked) { setSelectedKws(new Set(displayedKw.map(k => k.id))); } else { setSelectedKws(new Set()); } }}
+                        className="accent-yellow-500" />
+                    </th>
                     <th className="text-left pb-2 font-medium">Keyword</th>
-                    <th className="text-right pb-2 font-medium">Volume</th>
-                    <th className="text-right pb-2 font-medium">Followers</th>
+                    <th className="text-right pb-2 font-medium pr-4 min-w-[80px]">Volume</th>
+                    <th className="text-right pb-2 font-medium pr-4 min-w-[90px]">Followers</th>
                     <th className="text-center pb-2 font-medium">Status</th>
                     <th className="text-right pb-2 font-medium">Used At</th>
+                    <th className="text-center pb-2 font-medium w-16">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-800/50">
                   {displayedKw.map((kw, i) => (
                     <tr key={kw.id || i} className="hover:bg-gray-800/30 transition">
+                      <td className="py-2">
+                        <input type="checkbox" checked={selectedKws.has(kw.id)}
+                          onChange={e => { const n = new Set(selectedKws); if (e.target.checked) n.add(kw.id); else n.delete(kw.id); setSelectedKws(n); }}
+                          className="accent-yellow-500" />
+                      </td>
                       <td className="py-2 text-white">{kw.keyword}</td>
-                      <td className="py-2 text-right text-gray-400">{formatNumber(kw.search_volume)}</td>
-                      <td className="py-2 text-right text-gray-400">{formatNumber(kw.followers)}</td>
+                      <td className="py-2 text-right text-gray-400 pr-4">{formatNumber(kw.search_volume)}</td>
+                      <td className="py-2 text-right text-gray-400 pr-4">{formatNumber(kw.followers)}</td>
                       <td className="py-2 text-center">
                         <span className={`text-xs font-semibold px-2 py-0.5 rounded ${
                           kw.status === "available"
@@ -596,6 +667,12 @@ export default function KeywordsPage() {
                         </span>
                       </td>
                       <td className="py-2 text-right text-gray-500 text-xs">{kw.used_at || "—"}</td>
+                      <td className="py-2 text-center">
+                        <button onClick={() => deleteKeyword(kw.id)} disabled={deletingKwId === kw.id}
+                          className="text-gray-500 hover:text-red-400 transition text-xs disabled:opacity-30">
+                          {deletingKwId === kw.id ? '…' : '✕'}
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -633,12 +710,20 @@ export default function KeywordsPage() {
       {/* ── Bulk Actions ───────────────────────────────────────────────── */}
       <div className="rounded-xl bg-gray-900 border border-red-500/10 p-5">
         <h3 className="text-sm font-bold text-red-400 mb-3">Bulk Actions</h3>
-        <button
-          onClick={() => setShowResetModal(true)}
-          className="px-4 py-2 rounded-lg text-xs font-semibold bg-red-900/50 hover:bg-red-900 text-red-200 border border-red-500/20 transition"
-        >
-          Reset All Keywords (mark as available)
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {selectedKws.size > 0 && (
+            <button onClick={bulkDelete} disabled={bulkDeleting}
+              className="px-4 py-2 rounded-lg text-xs font-semibold bg-red-900/50 hover:bg-red-900 text-red-200 border border-red-500/20 transition disabled:opacity-50">
+              {bulkDeleting ? 'Deleting…' : `🗑 Delete Selected (${selectedKws.size})`}
+            </button>
+          )}
+          <button
+            onClick={() => setShowResetModal(true)}
+            className="px-4 py-2 rounded-lg text-xs font-semibold bg-red-900/50 hover:bg-red-900 text-red-200 border border-red-500/20 transition"
+          >
+            Reset All Keywords (mark as available)
+          </button>
+        </div>
       </div>
 
       <ConfirmModal

@@ -6,11 +6,11 @@ import {
   hermesGet,
   hermesPost,
   formatCurrency,
-  budgetColor,
   type Stats,
-  type HealthData,
   type Job,
   type Draft,
+  decodeHtmlEntities,
+  qualityBadgeColor,
 } from "@/components/hermes/utils";
 
 // ─── Spinner ─────────────────────────────────────────────────────────────────
@@ -24,10 +24,13 @@ function Spinner({ className = "" }: { className?: string }) {
 
 // ─── Main Overview Page ──────────────────────────────────────────────────────
 export default function HermesOverview() {
-  const [health, setHealth] = useState<HealthData | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [health, setHealth] = useState<any>(null);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [recentJobs, setRecentJobs] = useState<Job[]>([]);
-  const [drafts, setDrafts] = useState<Draft[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [recentJobs, setRecentJobs] = useState<any[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [drafts, setDrafts] = useState<any[]>([]);
   const [hermesOnline, setHermesOnline] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string>("");
@@ -44,16 +47,19 @@ export default function HermesOverview() {
 
   const loadData = useCallback(async () => {
     setRefreshing(true);
-    const [healthRes, statsRes, jobsRes, draftsRes] = await Promise.allSettled([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [healthRes, statsRes, jobsRes, draftsRes] = await Promise.allSettled<any>([
       hermesGet("/health"),
       hermesGet("/stats"),
       hermesGet("/jobs/recent?limit=5"),
       hermesGet("/drafts"),
     ]);
 
-    if (healthRes.status === "fulfilled" && healthRes.value?.status === "online") {
-      setHermesOnline(true);
-      setHealth(healthRes.value);
+    if (healthRes.status === "fulfilled") {
+      const hv = healthRes.value;
+      const isOnline = hv?.online === true || hv?.status === "online";
+      setHermesOnline(isOnline);
+      setHealth(hv);
     } else {
       setHermesOnline(false);
     }
@@ -81,9 +87,9 @@ export default function HermesOverview() {
   }, [loadData]);
 
   // Quick generate — picks from keyword queue, then generates
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const quickGenerate = async (niche: string) => {
-    // Step 1: pick the highest-volume available keyword
-    const kwRes = await hermesGet(`/keywords/${niche}/list?limit=1&status=available`);
+    const kwRes = await hermesGet<any>(`/keywords/${niche}/list?limit=1&status=available`);
     if (kwRes?.error) {
       setError(kwRes.error);
       return;
@@ -95,8 +101,7 @@ export default function HermesOverview() {
     }
     const keyword = kws[0].keyword;
 
-    // Step 2: start the generation
-    const res = await hermesPost("/article/run", { niche, keyword, dry_run: true });
+    const res = await hermesPost<any>("/article/run", { niche, keyword, dry_run: true });
     if (res.success || res.job_id) {
       setMessage(`Job started for ${niche}: "${keyword}"`);
     } else {
@@ -104,9 +109,34 @@ export default function HermesOverview() {
     }
   };
 
+  // Budget calculations — support both old and new field names
   const budget = stats?.budget;
-  const dailyPct = budget && budget.daily_limit > 0 ? (budget.spent_today / budget.daily_limit) * 100 : 0;
-  const monthlyPct = budget && budget.monthly_limit > 0 ? (budget.spent_this_month / budget.monthly_limit) * 100 : 0;
+  const dailySpent = budget ? (budget.today_usd ?? (budget as any).spent_today ?? 0) : 0;
+  const dailyLimit = budget ? (budget.today_limit ?? (budget as any).daily_limit ?? 8.33) : 8.33;
+  const monthlySpent = budget ? (budget.month_usd ?? (budget as any).spent_this_month ?? 0) : 0;
+  const monthlyLimit = budget ? (budget.month_limit ?? (budget as any).monthly_limit ?? 250) : 250;
+  const dailyPct = dailyLimit > 0 ? (dailySpent / dailyLimit) * 100 : 0;
+  const monthlyPct = monthlyLimit > 0 ? (monthlySpent / monthlyLimit) * 100 : 0;
+
+  const pctBarColor = (pct: number) => {
+    if (pct >= 80) return "bg-red-500";
+    if (pct >= 50) return "bg-yellow-500";
+    return "bg-emerald-500";
+  };
+  const pctTextColor = (pct: number) => {
+    if (pct >= 80) return "text-red-400";
+    if (pct >= 50) return "text-yellow-400";
+    return "text-emerald-400";
+  };
+
+  // Niches — support both array and object shapes
+  const nicheEntries: [string, any][] = (() => {
+    if (!stats?.niches) return [];
+    if (Array.isArray(stats.niches)) {
+      return stats.niches.map((n: any) => [n.niche_id || n.id || n.name, n]);
+    }
+    return Object.entries(stats.niches);
+  })();
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
@@ -148,9 +178,9 @@ export default function HermesOverview() {
       {/* ── System Status Row ────────────────────────────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: "Hermes Brain", value: health?.models?.research || "gemini-2.5-pro", icon: "🧠" },
-          { label: "Article Writer", value: health?.models?.content || "gemini-3.1-pro-preview", icon: "✍️" },
-          { label: "Image Generator", value: health?.models?.images || "gemini-3.1-flash-image-preview", icon: "🎨" },
+          { label: "Hermes Brain", value: health?.models?.research || health?.models?.brain?.name || "gemini-2.5-pro", icon: "🧠" },
+          { label: "Article Writer", value: health?.models?.content || health?.models?.writer?.name || "gemini-3.1-pro-preview", icon: "✍️" },
+          { label: "Image Generator", value: health?.models?.images || health?.models?.image?.name || "gemini-3.1-flash-image-preview", icon: "🎨" },
           { label: "VPS", value: "34.62.198.158", icon: "🖥️" },
         ].map((item) => (
           <div key={item.label} className="rounded-xl p-4 bg-gray-900 border border-gray-800 flex items-center gap-3">
@@ -172,13 +202,13 @@ export default function HermesOverview() {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-gray-400 text-xs">Today</span>
-              <span className={`text-sm font-bold ${budgetColor(dailyPct).text}`}>
-                {formatCurrency(budget?.spent_today ?? 0)} / {formatCurrency(budget?.daily_limit ?? 8.33)}
+              <span className={`text-sm font-bold ${pctTextColor(dailyPct)}`}>
+                {formatCurrency(dailySpent)} / {formatCurrency(dailyLimit)}
               </span>
             </div>
             <div className="w-full h-2 rounded-full bg-gray-800 overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all duration-700 ${budgetColor(dailyPct).bar}`}
+                className={`h-full rounded-full transition-all duration-700 ${pctBarColor(dailyPct)}`}
                 style={{ width: `${Math.min(dailyPct, 100)}%` }}
               />
             </div>
@@ -187,13 +217,13 @@ export default function HermesOverview() {
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-gray-400 text-xs">This Month</span>
-              <span className={`text-sm font-bold ${budgetColor(monthlyPct).text}`}>
-                {formatCurrency(budget?.spent_this_month ?? 0)} / {formatCurrency(budget?.monthly_limit ?? 250)}
+              <span className={`text-sm font-bold ${pctTextColor(monthlyPct)}`}>
+                {formatCurrency(monthlySpent)} / {formatCurrency(monthlyLimit)}
               </span>
             </div>
             <div className="w-full h-2 rounded-full bg-gray-800 overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all duration-700 ${budgetColor(monthlyPct).bar}`}
+                className={`h-full rounded-full transition-all duration-700 ${pctBarColor(monthlyPct)}`}
                 style={{ width: `${Math.min(monthlyPct, 100)}%` }}
               />
             </div>
@@ -201,8 +231,8 @@ export default function HermesOverview() {
         </div>
         {/* API Quotas */}
         <div className="flex flex-wrap gap-4 pt-2 border-t border-gray-800 text-xs text-gray-400">
-          <span>Content calls: <b className="text-white">{budget?.content_calls_today ?? 0}</b> / {budget?.content_calls_limit ?? 250}</span>
-          <span>Images: <b className="text-white">{budget?.images_today ?? 0}</b> / {budget?.images_limit ?? 1000}</span>
+          <span>Content calls: <b className="text-white">{budget?.content_calls ?? (budget as any)?.content_calls_today ?? 0}</b> / {budget?.content_limit ?? (budget as any)?.content_calls_limit ?? 250}</span>
+          <span>Images: <b className="text-white">{budget?.image_calls ?? (budget as any)?.images_today ?? 0}</b> / {budget?.image_limit ?? (budget as any)?.images_limit ?? 1000}</span>
         </div>
       </div>
 
@@ -210,12 +240,12 @@ export default function HermesOverview() {
       <div className="space-y-3">
         <h2 className="text-sm font-bold text-white uppercase tracking-wider">Active Sites</h2>
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {stats?.niches && Object.entries(stats.niches).map(([nicheId, niche]) => (
+          {nicheEntries.map(([nicheId, niche]) => (
             <div key={nicheId} className="rounded-xl bg-gray-900 border border-gray-800 p-4 space-y-3 hover:border-gray-700 transition">
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="text-white font-semibold text-sm">{niche.display_name || nicheId}</p>
-                  <p className="text-gray-500 text-xs truncate">{niche.site_url || ""}</p>
+                  <p className="text-white font-semibold text-sm">{niche.display_name || niche.name || nicheId}</p>
+                  <p className="text-gray-500 text-xs truncate">{niche.site_url || niche.url || ""}</p>
                 </div>
                 <StatusBadge status={hermesOnline ? "online" : "offline"} size="sm" />
               </div>
@@ -234,7 +264,7 @@ export default function HermesOverview() {
               </button>
             </div>
           ))}
-          {(!stats?.niches || Object.keys(stats.niches).length === 0) && (
+          {nicheEntries.length === 0 && (
             <div className="col-span-full text-center py-8 text-gray-500 text-sm">
               No sites configured. Add sites in the Sites tab.
             </div>
@@ -260,28 +290,39 @@ export default function HermesOverview() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800/50">
-                {recentJobs.map((job) => (
-                  <tr key={job.job_id} className="hover:bg-gray-800/30 transition">
-                    <td className="py-2.5 text-white font-medium">{job.keyword}</td>
-                    <td className="py-2.5 text-gray-400">{job.niche}</td>
-                    <td className="py-2.5">
-                      <span className={`text-xs font-semibold ${
-                        job.status === "complete" ? "text-emerald-400" :
-                        job.status === "running" ? "text-yellow-400" : "text-red-400"
-                      }`}>
-                        {job.status === "complete" ? "✅" : job.status === "running" ? "🔄" : "❌"} {job.status}
-                      </span>
-                    </td>
-                    <td className="py-2.5 text-gray-400">{job.result?.quality_score ? `${job.result.quality_score}/100` : "—"}</td>
-                    <td className="py-2.5 text-right">
-                      {job.result?.edit_url && (
-                        <a href={job.result.edit_url} target="_blank" rel="noopener noreferrer" className="text-xs text-yellow-400 hover:text-yellow-300">
-                          Edit →
-                        </a>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {recentJobs.map((job: any) => {
+                  const jobStatus = job.status || job.stage || "unknown";
+                  const score = job.result?.quality_score || job.quality_score;
+                  const editUrl = job.result?.edit_url || job.result?.wp_edit_url;
+                  return (
+                    <tr key={job.job_id || job.id} className="hover:bg-gray-800/30 transition">
+                      <td className="py-2.5 text-white font-medium">{decodeHtmlEntities(job.keyword)}</td>
+                      <td className="py-2.5 text-gray-400">{job.niche}</td>
+                      <td className="py-2.5">
+                        <span className={`text-xs font-semibold ${
+                          jobStatus === "complete" ? "text-emerald-400" :
+                          jobStatus === "running" ? "text-yellow-400" : "text-red-400"
+                        }`}>
+                          {jobStatus === "complete" ? "✅" : jobStatus === "running" ? "🔄" : "❌"} {jobStatus}
+                        </span>
+                      </td>
+                      <td className="py-2.5 text-gray-400">
+                        {score ? (
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${qualityBadgeColor(score)}`}>
+                            {score}/100
+                          </span>
+                        ) : "—"}
+                      </td>
+                      <td className="py-2.5 text-right">
+                        {editUrl && (
+                          <a href={editUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-yellow-400 hover:text-yellow-300">
+                            Edit →
+                          </a>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -297,32 +338,43 @@ export default function HermesOverview() {
           <p className="text-gray-500 text-sm py-4 text-center">No pending drafts.</p>
         ) : (
           <div className="space-y-2">
-            {drafts.map((draft) => (
-              <div
-                key={draft.id}
-                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg bg-gray-800/40 border border-gray-800 px-4 py-3 hover:border-gray-700 transition"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-white text-sm font-medium truncate">{draft.title}</p>
-                  <div className="flex items-center gap-3 mt-1">
-                    {draft.niche && <span className="text-gray-500 text-xs">{draft.niche}</span>}
-                    <span className={`text-xs ${draft.featured_media > 0 ? "text-emerald-400" : "text-yellow-500"}`}>
-                      {draft.featured_media > 0 ? "✅ Image" : "⚠️ No image"}
-                    </span>
-                    {draft.word_count && <span className="text-gray-500 text-xs">{draft.word_count.toLocaleString()} words</span>}
-                    <span className="text-gray-600 text-xs">{draft.date}</span>
-                  </div>
-                </div>
-                <a
-                  href={draft.edit_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-gray-200 hover:text-white transition"
+            {drafts.map((draft: any) => {
+              const hasImg = draft.has_image || (draft.featured_media > 0) || !!draft.thumbnail_url;
+              const editUrl = draft.wp_edit_url || draft.edit_url;
+              return (
+                <div
+                  key={draft.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg bg-gray-800/40 border border-gray-800 px-4 py-3 hover:border-gray-700 transition"
                 >
-                  📝 Edit in WordPress →
-                </a>
-              </div>
-            ))}
+                  <div className="min-w-0 flex-1">
+                    <p className="text-white text-sm font-medium truncate">{decodeHtmlEntities(draft.title)}</p>
+                    <div className="flex items-center gap-3 mt-1">
+                      {draft.niche && <span className="text-gray-500 text-xs">{draft.niche}</span>}
+                      <span className={`text-xs ${hasImg ? "text-emerald-400" : "text-yellow-500"}`}>
+                        {hasImg ? "✅ Image" : "⚠️ No image"}
+                      </span>
+                      {draft.word_count && <span className="text-gray-500 text-xs">{draft.word_count.toLocaleString()} words</span>}
+                      {draft.quality_score && (
+                        <span className={`text-xs px-1.5 py-0.5 rounded ${qualityBadgeColor(draft.quality_score)}`}>
+                          {draft.quality_score}/100
+                        </span>
+                      )}
+                      <span className="text-gray-600 text-xs">{draft.date}</span>
+                    </div>
+                  </div>
+                  {editUrl && (
+                    <a
+                      href={editUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-gray-200 hover:text-white transition"
+                    >
+                      📝 Edit in WordPress →
+                    </a>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

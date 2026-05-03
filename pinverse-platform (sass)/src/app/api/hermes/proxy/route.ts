@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase-server";
-import { promises as fs } from "fs";
-import path from "path";
+import { hermesRead, hermesWrite } from "@/lib/hermes-storage";
 
 const HERMES_URL = process.env.HERMES_API_URL || "http://34.62.198.158:8080";
 const HERMES_KEY = process.env.HERMES_API_KEY || "";
 const ADMIN_EMAIL = process.env.NEXT_PUBLIC_ADMIN_EMAIL || "";
 
-// ─── Local Sites Store (fallback when VPS lacks /sites endpoints) ────────────
-// Sites are stored in a JSON file so they survive restarts.
-const SITES_FILE = path.join(process.cwd(), ".hermes-sites.json");
-const KEYWORDS_FILE = path.join(process.cwd(), ".hermes-keywords.json");
-const SETTINGS_FILE = path.join(process.cwd(), ".hermes-settings.json");
-const BUDGET_FILE = path.join(process.cwd(), ".hermes-budget.json");
-const SCHEDULE_FILE = path.join(process.cwd(), ".hermes-schedule.json");
+// ─── Hermes Data Persistence ─────────────────────────────────────────────────
+// All data is stored in Supabase Storage (S3-backed), with filesystem fallback
+// for local development. See src/lib/hermes-storage.ts for implementation.
 
 interface LocalSite {
   id: string;
@@ -28,6 +23,7 @@ interface LocalSite {
   ad_network: string;
   tone: string;
   content_types: string[];
+  amazon_tag: string;
   keywords_available: number;
   articles_total: number;
   status: string;
@@ -35,16 +31,11 @@ interface LocalSite {
 }
 
 async function readSites(): Promise<LocalSite[]> {
-  try {
-    const raw = await fs.readFile(SITES_FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+  return hermesRead<LocalSite[]>("sites", []);
 }
 
 async function writeSites(sites: LocalSite[]): Promise<void> {
-  await fs.writeFile(SITES_FILE, JSON.stringify(sites, null, 2), "utf-8");
+  await hermesWrite("sites", sites);
 }
 
 // ─── Local Keywords Store (fallback when VPS lacks keyword endpoints) ────────
@@ -66,16 +57,11 @@ interface KeywordsStore {
 }
 
 async function readKeywords(): Promise<KeywordsStore> {
-  try {
-    const raw = await fs.readFile(KEYWORDS_FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
+  return hermesRead<KeywordsStore>("keywords", {});
 }
 
 async function writeKeywords(store: KeywordsStore): Promise<void> {
-  await fs.writeFile(KEYWORDS_FILE, JSON.stringify(store, null, 2), "utf-8");
+  await hermesWrite("keywords", store);
 }
 
 // Parse CSV content supporting two formats:
@@ -133,6 +119,9 @@ function parseCsvToKeywords(csvContent: string, niche: string): LocalKeyword[] {
     }
 
     if (!keyword) continue;
+
+    // Skip keywords with fewer than 100 monthly searches
+    if (searchVolume < 100) continue;
 
     // Skip duplicates
     const normalizedKey = keyword.toLowerCase();
@@ -287,8 +276,6 @@ async function handleKeywordsReset(niche: string): Promise<NextResponse> {
 
 // ─── Local Products Store (fallback per-site) ────────────────────────────────
 
-const PRODUCTS_FILE = path.join(process.cwd(), ".hermes-products.json");
-
 interface LocalProduct {
   title: string;
   url: string;
@@ -305,16 +292,11 @@ interface ProductsStore {
 }
 
 async function readProducts(): Promise<ProductsStore> {
-  try {
-    const raw = await fs.readFile(PRODUCTS_FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
+  return hermesRead<ProductsStore>("products", {});
 }
 
 async function writeProducts(store: ProductsStore): Promise<void> {
-  await fs.writeFile(PRODUCTS_FILE, JSON.stringify(store, null, 2), "utf-8");
+  await hermesWrite("products", store);
 }
 
 async function handleProductsGet(niche: string): Promise<NextResponse> {
@@ -373,6 +355,70 @@ async function handleProductsSearch(niche: string, query: string): Promise<NextR
   return NextResponse.json({ products: results, success: true });
 }
 
+async function handleProductsSync(niche: string, body: Record<string, unknown>): Promise<NextResponse> {
+  const sitemapUrl = String(body.sitemap_url || body.sitemapUrl || "");
+  if (!sitemapUrl) return NextResponse.json({ error: "No sitemap URL provided", success: false }, { status: 400 });
+
+  try {
+    const res = await fetch(sitemapUrl, { headers: { "User-Agent": "Mozilla/5.0 HermesSync" } });
+    if (!res.ok) {
+      return NextResponse.json({ error: `Failed to fetch sitemap: HTTP ${res.status}`, success: false }, { status: 400 });
+    }
+    const xml = await res.text();
+    
+    // Extract all <loc> tags representing URLs
+    const matches = Array.from(xml.matchAll(/<loc>(.*?)<\/loc>/gi)).map(m => m[1].trim());
+    
+    // Naively filter out common non-product URLs if it's a general sitemap
+    const productUrls = matches.filter(url => {
+      const lower = url.toLowerCase();
+      // Skip known non-product pages
+      if (lower.includes("/page/") || lower.includes("/feed/") || lower.includes("/tag/") || lower.includes("/category/")) return false;
+      // Skip media files inside sitemaps
+      if (lower.match(/\.(jpg|jpeg|png|gif|webp|svg|pdf)$/)) return false;
+      return true;
+    });
+
+    if (productUrls.length === 0) {
+      return NextResponse.json({ error: "No valid product URLs found in the sitemap", success: false }, { status: 400 });
+    }
+
+    const store = await readProducts();
+    const existing = store[niche]?.products || [];
+    const existingUrls = new Set(existing.map((p) => p.url.toLowerCase()));
+
+    const newProducts: LocalProduct[] = productUrls
+      .filter((url) => !existingUrls.has(url.toLowerCase()))
+      .map((url) => {
+        // Extract a readable title from the URL slug
+        const slug = url.replace(/\/$/, "").split("/").pop() || "";
+        const title = slug.replace(/[-_]/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+        return {
+          title,
+          url,
+          description: "",
+          price: "",
+          last_fetched: new Date().toISOString(),
+        };
+      });
+
+    store[niche] = {
+      products: [...existing, ...newProducts],
+      last_synced: new Date().toISOString(),
+    };
+    await writeProducts(store);
+
+    return NextResponse.json({
+      success: true,
+      imported: newProducts.length,
+      total: store[niche].products.length,
+      message: `Successfully synced ${newProducts.length} new products from sitemap`,
+    });
+  } catch (err) {
+    return NextResponse.json({ error: `Sitemap sync error: ${String(err)}`, success: false }, { status: 500 });
+  }
+}
+
 async function handleProductsClear(niche: string): Promise<NextResponse> {
   const store = await readProducts();
   const count = store[niche]?.products?.length || 0;
@@ -400,16 +446,12 @@ const DEFAULT_SETTINGS: LocalSettings = {
 };
 
 async function readSettings(): Promise<LocalSettings> {
-  try {
-    const raw = await fs.readFile(SETTINGS_FILE, "utf-8");
-    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
-  } catch {
-    return { ...DEFAULT_SETTINGS };
-  }
+  const custom = await hermesRead<Partial<LocalSettings>>("settings", {});
+  return { ...DEFAULT_SETTINGS, ...custom };
 }
 
 async function writeSettings(settings: LocalSettings): Promise<void> {
-  await fs.writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), "utf-8");
+  await hermesWrite("settings", settings);
 }
 
 async function handleSettingsGet(): Promise<NextResponse> {
@@ -461,16 +503,12 @@ const DEFAULT_BUDGET: LocalBudget = {
 };
 
 async function readBudget(): Promise<LocalBudget> {
-  try {
-    const raw = await fs.readFile(BUDGET_FILE, "utf-8");
-    return { ...DEFAULT_BUDGET, ...JSON.parse(raw) };
-  } catch {
-    return { ...DEFAULT_BUDGET };
-  }
+  const custom = await hermesRead<Partial<LocalBudget>>("budget", {});
+  return { ...DEFAULT_BUDGET, ...custom };
 }
 
 async function writeBudget(budget: LocalBudget): Promise<void> {
-  await fs.writeFile(BUDGET_FILE, JSON.stringify(budget, null, 2), "utf-8");
+  await hermesWrite("budget", budget);
 }
 
 async function handleBudgetGet(): Promise<NextResponse> {
@@ -504,16 +542,11 @@ interface LocalScheduleJob {
 }
 
 async function readSchedule(): Promise<LocalScheduleJob[]> {
-  try {
-    const raw = await fs.readFile(SCHEDULE_FILE, "utf-8");
-    return JSON.parse(raw);
-  } catch {
-    return [];
-  }
+  return hermesRead<LocalScheduleJob[]>("schedule", []);
 }
 
 async function writeSchedule(jobs: LocalScheduleJob[]): Promise<void> {
-  await fs.writeFile(SCHEDULE_FILE, JSON.stringify(jobs, null, 2), "utf-8");
+  await hermesWrite("schedule", jobs);
 }
 
 async function handleScheduleGet(): Promise<NextResponse> {
@@ -643,6 +676,7 @@ async function handleSitesGet(_sitesPath: string): Promise<NextResponse> {
             ad_network: "None",
             tone: "warm-conversational",
             content_types: [],
+            amazon_tag: String(vpsSite.amazon_tag || ""),
             keywords_available: vpsSite.keywords_available ?? 0,
             articles_total: vpsSite.articles_total ?? 0,
             status: "active",
@@ -716,11 +750,40 @@ function bodyToSite(body: Record<string, unknown>): LocalSite {
     ad_network: String(body.ad_network || "None"),
     tone: String(body.tone || "warm-conversational"),
     content_types: Array.isArray(body.content_types) ? body.content_types as string[] : [],
+    amazon_tag: String(body.amazon_tag || ""),
     keywords_available: 0,
     articles_total: 0,
     status: "active",
     created_at: new Date().toISOString(),
   };
+}
+
+async function handleSitesUpdate(nicheId: string, body: Record<string, unknown>): Promise<NextResponse> {
+  const sites = await readSites();
+  const idx = sites.findIndex((s) => s.niche_id === nicheId);
+  if (idx < 0) {
+    return NextResponse.json({ error: `Site "${nicheId}" not found`, success: false }, { status: 404 });
+  }
+
+  // Merge fields — only update fields that are present in the body
+  const site = sites[idx];
+  if (body.display_name !== undefined) { site.name = String(body.display_name); site.display_name = String(body.display_name); }
+  if (body.site_url !== undefined) site.url = String(body.site_url);
+  if (body.wp_username !== undefined) site.wp_username = String(body.wp_username);
+  if (body.wp_app_password !== undefined && String(body.wp_app_password).trim()) site.wp_app_password = String(body.wp_app_password);
+  if (body.amazon_tag !== undefined) site.amazon_tag = String(body.amazon_tag);
+  if (body.tone !== undefined) site.tone = String(body.tone);
+  if (body.ad_network !== undefined) site.ad_network = String(body.ad_network);
+  if (Array.isArray(body.affiliate_programs)) site.affiliate_programs = body.affiliate_programs as string[];
+  if (Array.isArray(body.content_types)) site.content_types = body.content_types as string[];
+
+  sites[idx] = site;
+  await writeSites(sites);
+
+  // Best-effort sync to VPS
+  try { await hermesRequest(`/sites/${nicheId}`, "PUT", body); } catch { /* non-blocking */ }
+
+  return NextResponse.json({ success: true, message: `Site "${nicheId}" updated` });
 }
 
 // ─── GET ─────────────────────────────────────────────────────────────────────
@@ -865,8 +928,8 @@ export async function POST(req: NextRequest) {
       return handleSettingsPost(body || {});
     }
 
-    // Budget
-    if (reqPath === "/budget" || reqPath === "/budget/") {
+    // Budget (also match /budget/update alias)
+    if (reqPath === "/budget" || reqPath === "/budget/" || reqPath === "/budget/update") {
       try {
         const { data, ok, status } = await hermesRequest(reqPath, "POST", body);
         if (ok && data?.success) return NextResponse.json(data);
@@ -883,6 +946,38 @@ export async function POST(req: NextRequest) {
         if (status !== 403 && status !== 404) return NextResponse.json(data, { status });
       } catch { /* fall through */ }
       return handleSchedulePost(body || {});
+    }
+
+    // Drafts publish — calls WordPress REST API to change post status
+    const publishMatch = typeof reqPath === "string" && reqPath.match(/^\/drafts\/([^/]+)\/publish$/);
+    if (publishMatch) {
+      const draftId = publishMatch[1];
+      // Try VPS first
+      try {
+        const { data, ok } = await hermesRequest(reqPath, "POST", body);
+        if (ok && (data?.success || data?.published)) return NextResponse.json(data);
+      } catch { /* fall through */ }
+      // Fallback: publish directly via WordPress REST API
+      const sites = await readSites();
+      for (const site of sites) {
+        if (site.wp_username && site.wp_app_password && site.url) {
+          try {
+            const wpRes = await fetch(`${site.url}/wp-json/wp/v2/posts/${draftId}`, {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: "Basic " + Buffer.from(`${site.wp_username}:${site.wp_app_password}`).toString("base64"),
+              },
+              body: JSON.stringify({ status: "publish" }),
+            });
+            if (wpRes.ok) {
+              const wpData = await wpRes.json();
+              return NextResponse.json({ success: true, published: true, title: wpData.title?.rendered || '', id: draftId });
+            }
+          } catch { /* try next site */ }
+        }
+      }
+      return NextResponse.json({ success: false, error: "Could not publish — no valid WP credentials found" }, { status: 400 });
     }
 
     // Test connection — special handling
@@ -919,9 +1014,18 @@ export async function POST(req: NextRequest) {
     const kwUploadMatch = typeof reqPath === "string" && reqPath.match(/^\/keywords\/([^/]+)\/upload$/);
     if (kwUploadMatch) {
       const niche = kwUploadMatch[1];
+      
+      const payload = body as Record<string, unknown>;
+      if (payload.is_base64 && typeof payload.csv_content === "string") {
+        try {
+          payload.csv_content = Buffer.from(payload.csv_content, "base64").toString("utf-8");
+          payload.is_base64 = false;
+        } catch { /* ignore */ }
+      }
+
       // Try VPS first
       try {
-        const { data, ok, status } = await hermesRequest(reqPath, "POST", body);
+        const { data, ok, status } = await hermesRequest(reqPath, "POST", payload);
         if (ok && data?.success) return NextResponse.json(data);
         // If 403 or 404, fall through to local handler
         if (status !== 403 && status !== 404) {
@@ -929,7 +1033,7 @@ export async function POST(req: NextRequest) {
         }
       } catch { /* VPS unreachable — fall through */ }
       // Local fallback
-      return handleKeywordsUpload(niche, body || {});
+      return handleKeywordsUpload(niche, payload);
     }
 
     // Keywords reset — local-backed handler
@@ -959,8 +1063,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Products sync — pass niche through to VPS, no local fallback needed for sync
-
+    // Products sync — local fallback using built-in XML scraping
+    if (typeof reqPath === "string" && (reqPath === "/products/sync" || reqPath === "/products/sync/")) {
+      const niche = String(body?.niche || "");
+      if (niche) {
+        try {
+          const { data, ok, status } = await hermesRequest(reqPath, "POST", body);
+          if (ok && data?.success) return NextResponse.json(data);
+          if (status !== 403 && status !== 404 && status !== 502) return NextResponse.json(data, { status });
+        } catch { /* fall through */ }
+        return handleProductsSync(niche, body || {});
+      }
+    }
     const { data, ok, status } = await hermesRequest(reqPath, "POST", body);
     return NextResponse.json(data, ok ? undefined : { status });
   } catch (err) {
@@ -1017,6 +1131,39 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ success: true, message: "Cleared (no local data)" });
   }
 
+  // Schedule delete — remove a schedule entry by niche
+  const schedDeleteMatch = reqPath.match(/^\/schedule\/([^/]+)$/);
+  if (schedDeleteMatch) {
+    const niche = schedDeleteMatch[1];
+    const jobs = await readSchedule();
+    const filtered = jobs.filter((j) => (j as any).niche !== niche);
+    if (filtered.length === jobs.length) {
+      return NextResponse.json({ error: `Schedule for "${niche}" not found`, success: false }, { status: 404 });
+    }
+    await writeSchedule(filtered);
+    return NextResponse.json({ success: true, message: `Schedule for "${niche}" removed` });
+  }
+
+  // Individual keyword delete — remove a single keyword by id
+  const kwDeleteMatch = reqPath.match(/^\/keywords\/([^/]+)\/([^/]+)$/);
+  if (kwDeleteMatch && kwDeleteMatch[2] !== 'reset' && kwDeleteMatch[2] !== 'upload' && kwDeleteMatch[2] !== 'list') {
+    const niche = kwDeleteMatch[1];
+    const kwId = kwDeleteMatch[2];
+    // Try VPS first
+    try {
+      const { data, ok } = await hermesRequest(reqPath, "DELETE");
+      if (ok && (data?.success || !data?.error)) return NextResponse.json({ ...data, success: true });
+    } catch { /* fall through to local */ }
+    // Local fallback — remove from stored keywords
+    const stored = await hermesRead<any[]>(`keywords_${niche}`, []);
+    const filtered = stored.filter((k: any) => k.id !== kwId && String(k.id) !== kwId);
+    if (filtered.length < stored.length) {
+      await hermesWrite(`keywords_${niche}`, filtered);
+      return NextResponse.json({ success: true, message: `Keyword removed from ${niche}` });
+    }
+    return NextResponse.json({ success: true, message: "Keyword not found locally, may have been deleted on VPS" });
+  }
+
   try {
     const { data, ok, status } = await hermesRequest(reqPath, "DELETE");
     return NextResponse.json(data, ok ? undefined : { status });
@@ -1024,6 +1171,39 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json(
       { error: "Cannot reach Hermes — check VPS connection", details: String(err) },
       { status: 502 }
+    );
+  }
+}
+
+// ─── PUT ─────────────────────────────────────────────────────────────────────
+export async function PUT(req: NextRequest) {
+  if (!(await verifyAdmin())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const { path: reqPath, ...body } = await req.json();
+
+    // Sites update — use local-backed handler
+    const siteMatch = typeof reqPath === "string" && reqPath.match(/^\/sites\/([^/]+)$/);
+    if (siteMatch) {
+      return handleSitesUpdate(siteMatch[1], body || {});
+    }
+
+    // Forward everything else to VPS
+    try {
+      const { data, ok, status } = await hermesRequest(reqPath, "PUT", body);
+      return NextResponse.json(data, ok ? undefined : { status });
+    } catch (err) {
+      return NextResponse.json(
+        { error: "Cannot reach Hermes — check VPS connection", details: String(err) },
+        { status: 502 }
+      );
+    }
+  } catch (err) {
+    return NextResponse.json(
+      { error: "Invalid request body", details: String(err) },
+      { status: 400 }
     );
   }
 }

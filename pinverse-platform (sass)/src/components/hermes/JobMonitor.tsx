@@ -1,181 +1,151 @@
-"use client";
+'use client'
 
-import { useEffect, useState, useRef, useCallback } from "react";
-import { hermesGet, type Job } from "./utils";
+import React, { useEffect, useState } from 'react'
+import { hermesGet, Job } from './utils'
 
 interface JobMonitorProps {
-  jobId: string | null;
-  onComplete?: () => void;
+  jobId: string
+  onComplete?: (job: Job) => void
+  onFailed?: (job: Job) => void
 }
 
-export default function JobMonitor({ jobId, onComplete }: JobMonitorProps) {
-  const [job, setJob] = useState<Job | null>(null);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const outputRef = useRef<HTMLPreElement>(null);
+const STAGE_LABELS: Record<string, { icon: string; label: string }> = {
+  queued:     { icon: '⏳', label: 'Queued' },
+  research:   { icon: '🔍', label: 'Researching keyword…' },
+  writing:    { icon: '✍️', label: 'Writing article…' },
+  publishing: { icon: '📤', label: 'Publishing to WordPress…' },
+  images:     { icon: '🖼', label: 'Generating hero image…' },
+  pinterest:  { icon: '📌', label: 'Creating Pinterest pins…' },
+  complete:   { icon: '✅', label: 'Complete!' },
+  failed:     { icon: '❌', label: 'Failed' },
+}
 
-  const stopPolling = useCallback(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-  }, []);
+const STAGE_ORDER = ['queued', 'research', 'writing', 'publishing', 'images', 'pinterest', 'complete']
+
+export default function JobMonitor({ jobId, onComplete, onFailed }: JobMonitorProps) {
+  const [job, setJob] = useState<Job | null>(null)
 
   useEffect(() => {
-    if (!jobId) {
-      setJob(null);
-      stopPolling();
-      return;
-    }
+    if (!jobId) return
+    let cancelled = false
 
-    // Initial fetch
-    hermesGet(`/job/${jobId}`)
-      .then(setJob)
-      .catch(() => {});
-
-    // Poll every 5 seconds
-    pollRef.current = setInterval(async () => {
+    const poll = async () => {
       try {
-        const res = await hermesGet(`/job/${jobId}`);
-        setJob(res);
-        if (res.status === "complete" || res.status === "failed") {
-          stopPolling();
-          onComplete?.();
+        // Dual-field: stage/status, id/job_id
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const raw = await hermesGet<any>(`/job/${jobId}`)
+        if (cancelled) return
+        const normalized: Job = {
+          ...raw,
+          id:    raw.id    ?? raw.job_id ?? jobId,
+          stage: raw.stage ?? raw.status ?? 'queued',
         }
-      } catch {
-        // keep polling
-      }
-    }, 5000);
-
-    return stopPolling;
-  }, [jobId, stopPolling, onComplete]);
-
-  // Auto-scroll output
-  useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+        setJob(normalized)
+        if (normalized.stage === 'complete') { onComplete?.(normalized); return }
+        if (normalized.stage === 'failed')   { onFailed?.(normalized);   return }
+      } catch { /* keep polling */ }
     }
-  }, [job?.output]);
 
-  if (!job) return null;
+    poll()
+    const interval = setInterval(poll, 5_000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [jobId, onComplete, onFailed])
 
-  const statusStyle =
-    job.status === "running"
-      ? "border-yellow-500/40 bg-yellow-500/5"
-      : job.status === "complete"
-      ? "border-emerald-500/40 bg-emerald-500/5"
-      : "border-red-500/40 bg-red-500/5";
+  if (!job) {
+    return (
+      <div className="mt-2 p-3 rounded-xl border border-white/10 bg-white/5 animate-pulse">
+        <div className="flex items-center gap-2 text-xs text-gray-400">
+          <div className="w-3 h-3 rounded-full bg-gray-600 animate-ping" />
+          <span>Starting job…</span>
+        </div>
+      </div>
+    )
+  }
 
-  const statusIcon =
-    job.status === "running" ? "🔄" : job.status === "complete" ? "✅" : "❌";
-
-  const statusLabel =
-    job.status === "running"
-      ? "Running…"
-      : job.status === "complete"
-      ? "Complete"
-      : "Failed";
-
-  // Progress stages (cosmetic — derived from output text)
-  const output = job.output || "";
-  const stages = [
-    { label: "Research outline", done: output.includes("outline") || output.includes("research") },
-    { label: "Article generation", done: output.includes("article") || output.includes("writing") },
-    { label: "SEO extraction", done: output.includes("seo") || output.includes("meta") },
-    { label: "Product link matching", done: output.includes("product") || output.includes("affiliate") },
-    { label: "Image generation (hero)", done: output.includes("hero") || output.includes("featured") },
-    { label: "Inline images", done: output.includes("inline") || output.includes("image") },
-    { label: "WordPress publish", done: job.status === "complete" },
-  ];
+  const currentStageIdx = STAGE_ORDER.indexOf(job.stage)
+  const isComplete = job.stage === 'complete'
+  const isFailed   = job.stage === 'failed'
+  const stageInfo  = STAGE_LABELS[job.stage] ?? { icon: '⏳', label: job.stage }
 
   return (
-    <div className={`rounded-xl border p-5 space-y-4 ${statusStyle}`}>
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <span className="text-lg">
-            {job.status === "running" ? (
-              <span className="inline-block animate-spin">🔄</span>
-            ) : (
-              statusIcon
-            )}
+    <div className={[
+      'mt-2 p-3 rounded-xl border text-xs space-y-2',
+      isComplete ? 'border-green-500/30 bg-green-500/5' :
+      isFailed   ? 'border-red-500/30   bg-red-500/5'   :
+                   'border-white/10     bg-white/5',
+    ].join(' ')}>
+
+      {/* Current stage */}
+      <div className="flex items-center gap-2">
+        <span className="text-base leading-none">{stageInfo.icon}</span>
+        <span className={[
+          'font-medium',
+          isComplete ? 'text-green-400' :
+          isFailed   ? 'text-red-400'   :
+                       'text-white',
+        ].join(' ')}>
+          {stageInfo.label}
+        </span>
+        {!isComplete && !isFailed && (
+          <span className="ml-auto flex gap-0.5">
+            {[0,1,2].map(i => (
+              <span
+                key={i}
+                className="w-1 h-1 rounded-full bg-yellow-400 animate-bounce"
+                style={{ animationDelay: `${i * 0.15}s` }}
+              />
+            ))}
           </span>
-          <div>
-            <span
-              className={`text-sm font-semibold ${
-                job.status === "running"
-                  ? "text-yellow-400"
-                  : job.status === "complete"
-                  ? "text-emerald-400"
-                  : "text-red-400"
-              }`}
-            >
-              {statusLabel}
-            </span>
-            <span className="text-gray-400 text-sm ml-3">
-              Keyword:{" "}
-              <span className="text-white font-medium">{job.keyword}</span>
-            </span>
-          </div>
-        </div>
-        <span className="text-gray-500 text-xs font-mono">{job.job_id}</span>
+        )}
       </div>
 
-      {/* Progress Stages */}
-      {job.status === "running" && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {stages.map((s, i) => (
+      {/* Stage progress bar */}
+      {!isFailed && (
+        <div className="flex gap-0.5">
+          {STAGE_ORDER.filter(s => s !== 'queued').map((s, idx) => (
             <div
-              key={i}
-              className={`text-xs flex items-center gap-1.5 ${
-                s.done ? "text-emerald-400" : "text-gray-600"
-              }`}
-            >
-              <span>{s.done ? "✓" : "○"}</span>
-              {s.label}
-            </div>
+              key={s}
+              className={[
+                'h-1 flex-1 rounded-full transition-all duration-500',
+                idx < currentStageIdx     ? 'bg-green-500' :
+                idx === currentStageIdx   ? 'bg-yellow-400 animate-pulse' :
+                                            'bg-white/10',
+              ].join(' ')}
+            />
           ))}
         </div>
       )}
 
-      {/* Live Output */}
-      {job.output && (
-        <pre
-          ref={outputRef}
-          className="max-h-72 overflow-y-auto rounded-lg bg-gray-950 border border-gray-800 p-3 text-xs text-gray-300 font-mono whitespace-pre-wrap leading-relaxed"
-        >
-          {job.output.slice(-2000)}
-        </pre>
-      )}
-
-      {/* Errors */}
-      {job.errors && (
-        <div className="rounded-lg bg-red-950/50 border border-red-500/20 p-3 text-xs text-red-300 font-mono whitespace-pre-wrap">
-          {job.errors}
-        </div>
-      )}
-
-      {/* Result */}
-      {job.status === "complete" && job.result && (
-        <div className="flex flex-wrap items-center gap-4 pt-2 border-t border-gray-800">
-          <div className="text-sm text-white font-medium">
-            {job.result.title}
-          </div>
-          <div className="flex items-center gap-3 text-xs text-gray-400">
-            <span>{job.result.word_count?.toLocaleString()} words</span>
-            <span>Score: {job.result.quality_score}/100</span>
-          </div>
-          {job.result.edit_url && (
-            <a
-              href={job.result.edit_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto px-3 py-1.5 rounded-lg text-xs font-semibold bg-yellow-500 hover:bg-yellow-400 text-black transition"
-            >
-              📝 Edit in WordPress →
-            </a>
+      {/* Result info */}
+      {isComplete && (
+        <div className="pt-1 border-t border-white/10 space-y-1">
+          {job.article_title && (
+            <p className="text-gray-300 truncate">📄 {job.article_title}</p>
           )}
+          <div className="flex gap-3 text-gray-400">
+            {job.quality_score !== undefined && (
+              <span>Score: <span className="text-green-400 font-medium">{job.quality_score}</span></span>
+            )}
+            {job.word_count !== undefined && (
+              <span>Words: <span className="text-blue-400 font-medium">{job.word_count.toLocaleString()}</span></span>
+            )}
+          </div>
         </div>
       )}
+
+      {/* Error info */}
+      {isFailed && job.error && (
+        <div className="pt-1 border-t border-red-500/20">
+          <p className="text-red-400 leading-relaxed break-all">{job.error}</p>
+        </div>
+      )}
+
+      {/* Keyword + niche */}
+      <div className="flex gap-2 text-gray-500">
+        <span className="truncate max-w-[140px]">{job.keyword}</span>
+        <span>·</span>
+        <span>{job.niche}</span>
+      </div>
     </div>
-  );
+  )
 }

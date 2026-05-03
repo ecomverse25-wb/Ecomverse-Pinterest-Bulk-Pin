@@ -1,403 +1,353 @@
-"use client";
+'use client'
 
-import { useEffect, useState, useCallback } from "react";
-import JobMonitor from "@/components/hermes/JobMonitor";
+import React, { useEffect, useState, useCallback } from 'react'
 import {
-  hermesGet,
-  hermesPost,
-  type Site,
-  type Job,
-  type Draft,
-} from "@/components/hermes/utils";
+  hermesGet, hermesPost, hermesCache,
+  decodeHtmlEntities, qualityBadgeColor, formatDate,
+  type Draft, type Job, type Site,
+} from '@/components/hermes/utils'
+import JobMonitor from '@/components/hermes/JobMonitor'
 
-function Spinner({ className = "" }: { className?: string }) {
+function Skeleton({ className }: { className?: string }) {
+  return <div className={`animate-pulse rounded-lg bg-white/10 ${className ?? ''}`} />
+}
+
+function DraftCard({ draft, onPublish, publishing }: { draft: Draft; onRefresh: () => void; onPublish?: (id: string) => void; publishing?: boolean }) {
   return (
-    <svg className={`animate-spin ${className}`} width="16" height="16" viewBox="0 0 24 24" fill="none">
-      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray="31.4 31.4" />
-    </svg>
-  );
+    <div className="flex items-center gap-3 p-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/8 transition-colors">
+      <div className="w-12 h-12 flex-shrink-0 rounded-lg overflow-hidden bg-white/10 flex items-center justify-center">
+        {draft.thumbnail_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={draft.thumbnail_url} alt="" className="w-full h-full object-cover"
+            onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+        ) : (<span className="text-xl">📄</span>)}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-white text-sm font-medium leading-snug truncate">{decodeHtmlEntities(draft.title)}</p>
+        <div className="flex items-center gap-2 mt-1 flex-wrap">
+          <span className="text-gray-500 text-xs">{draft.niche}</span>
+          {draft.has_image && (
+            <span className="text-xs bg-green-500/20 text-green-400 border border-green-500/30 px-1.5 py-0.5 rounded-md">✅ Hero image</span>
+          )}
+          {draft.quality_score !== undefined && (
+            <span className={`text-xs px-1.5 py-0.5 rounded-md font-bold ${qualityBadgeColor(draft.quality_score)}`}>{draft.quality_score}</span>
+          )}
+          {draft.word_count !== undefined && (
+            <span className="text-xs text-gray-500">{draft.word_count.toLocaleString()} words</span>
+          )}
+          <span className="text-gray-600 text-xs">Date: {draft.date}</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {onPublish && (
+          <button onClick={() => onPublish(String(draft.id))} disabled={publishing}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20 text-xs transition-all whitespace-nowrap disabled:opacity-40">
+            {publishing ? '…' : '✅ Publish'}
+          </button>
+        )}
+        <a href={draft.wp_edit_url} target="_blank" rel="noopener noreferrer"
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white text-xs transition-all whitespace-nowrap">
+          📝 Edit →
+        </a>
+      </div>
+    </div>
+  )
 }
 
 export default function ContentPage() {
-  const [sites, setSites] = useState<Site[]>([]);
-  const [niche, setNiche] = useState("");
-  const [keyword, setKeyword] = useState("");
-  const [dryRun, setDryRun] = useState(true);
-  const [generating, setGenerating] = useState(false);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [sitesLoading, setSitesLoading] = useState(true)
+  const [sites, setSites] = useState<Site[]>([])
+  const [selectedSite, setSelectedSite] = useState<string>('')
+  const [jobsLoading, setJobsLoading] = useState(true)
+  const [draftsLoading, setDraftsLoading] = useState(true)
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [drafts, setDrafts] = useState<Draft[]>([])
+  const [totalDrafts, setTotalDrafts] = useState(0)
+  const [draftFilter, setDraftFilter] = useState<'all' | string>('all')
+  const [keyword, setKeyword] = useState('')
+  const [dryRun, setDryRun] = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [publishingId, setPublishingId] = useState<string | null>(null)
+  const [publishingAll, setPublishingAll] = useState(false)
+  const [toast, setToast] = useState<{ type: 'success' | 'error'; msg: string } | null>(null)
 
-  // Recent jobs
-  const [recentJobs, setRecentJobs] = useState<Job[]>([]);
-  const [jobsLoading, setJobsLoading] = useState(true);
+  const showToast = useCallback((type: 'success' | 'error', msg: string) => {
+    setToast({ type, msg }); setTimeout(() => setToast(null), 5000)
+  }, [])
 
-  // Drafts
-  const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [draftsLoading, setDraftsLoading] = useState(true);
-  const [draftsFilter, setDraftsFilter] = useState("all");
-
-  // Batch
-  const [batchCount, setBatchCount] = useState(0);
-  const [batchRunning, setBatchRunning] = useState(false);
-
-  // Feedback
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (message) { const t = setTimeout(() => setMessage(""), 5000); return () => clearTimeout(t); }
-  }, [message]);
-  useEffect(() => {
-    if (error) { const t = setTimeout(() => setError(""), 8000); return () => clearTimeout(t); }
-  }, [error]);
-
-  // Load sites
-  useEffect(() => {
-    (async () => {
-      const res = await hermesGet("/sites");
-      if (res?.error) {
-        setError(res.error);
-      } else {
-        const siteList = res?.sites || [];
-        setSites(siteList);
-        if (siteList.length > 0) setNiche(siteList[0].niche_id);
-      }
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Load recent jobs and drafts
-  const loadData = useCallback(async () => {
-    setJobsLoading(true);
-    setDraftsLoading(true);
-    const [jobsRes, draftsRes] = await Promise.allSettled([
-      hermesGet("/jobs/recent?limit=10"),
-      hermesGet(draftsFilter === "all" ? "/drafts" : `/drafts?niche=${draftsFilter}`),
-    ]);
-    if (jobsRes.status === "fulfilled" && !jobsRes.value?.error) setRecentJobs(jobsRes.value?.jobs || []);
-    if (draftsRes.status === "fulfilled" && !draftsRes.value?.error) setDrafts(draftsRes.value?.drafts || []);
-    setJobsLoading(false);
-    setDraftsLoading(false);
-  }, [draftsFilter]);
-
-  useEffect(() => { loadData(); }, [loadData]);
-
-  // Generate single article
-  const runArticle = async () => {
-    if (!keyword.trim() || !niche) return;
-    setGenerating(true);
-    setError("");
-    const res = await hermesPost("/article/run", {
-      niche,
-      keyword: keyword.trim(),
-      dry_run: dryRun,
-    });
-    if (res.success || res.job_id) {
-      setActiveJobId(res.job_id);
-      setMessage(res.message || "Job started");
-      setKeyword("");
-    } else {
-      setError(res.detail || res.error || res.message || "Failed to start job");
-    }
-    setGenerating(false);
-  };
-
-  // Pick from queue (highest volume unused keyword)
-  const pickFromQueue = async () => {
-    if (!niche) return;
-    const res = await hermesGet(`/keywords/${niche}/list?limit=1&status=available`);
-    if (res?.error) {
-      setError(res.error);
-      return;
-    }
-    const kws = res?.keywords || [];
-    if (kws.length > 0) {
-      setKeyword(kws[0].keyword);
-      setMessage(`Picked: "${kws[0].keyword}" (vol: ${kws[0].search_volume})`);
-    } else {
-      setError("No available keywords in queue");
-    }
-  };
-
-  // Generate batch (3 articles)
-  const runBatch = async () => {
-    if (!niche) return;
-    setBatchRunning(true);
-    setBatchCount(0);
+  const loadSites = useCallback(async () => {
+    setSitesLoading(true)
     try {
-      const res = await hermesGet(`/keywords/${niche}/list?limit=3&status=available`);
-      const kws = res?.keywords || [];
-      if (kws.length === 0) {
-        setError("No available keywords in queue");
-        setBatchRunning(false);
-        return;
+      const cached = hermesCache.get<Site[]>('content_sites')
+      if (cached) { setSites(cached); if (!selectedSite && cached.length > 0) setSelectedSite(cached[0].niche_id) }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await hermesGet<any>('/sites')
+      const list: Site[] = (res?.sites ?? res ?? []).map((s: any) => ({
+        id: s.id ?? s.niche_id, niche_id: s.niche_id ?? s.id, name: s.name ?? s.niche_id,
+        url: s.url ?? '', wp_connected: s.wp_connected ?? false,
+        keywords_available: s.keywords_available ?? 0, articles_today: s.articles_today ?? 0,
+      }))
+      setSites(list); hermesCache.set('content_sites', list)
+      if (!selectedSite && list.length > 0) setSelectedSite(list[0].niche_id)
+    } catch (err) { console.error('[Content] loadSites:', err) }
+    finally { setSitesLoading(false) }
+  }, [selectedSite])
+
+  const loadJobs = useCallback(async () => {
+    setJobsLoading(true)
+    try {
+      const cached = hermesCache.get<Job[]>('content_jobs'); if (cached) setJobs(cached)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await hermesGet<any>('/jobs?limit=10')
+      const list: Job[] = (res?.jobs ?? res?.items ?? res ?? []).map((j: any) => ({
+        ...j, id: j.id ?? j.job_id, stage: j.stage ?? j.status ?? 'queued',
+      }))
+      setJobs(list); hermesCache.set('content_jobs', list)
+    } catch { /* keep stale */ } finally { setJobsLoading(false) }
+  }, [])
+
+  const loadDrafts = useCallback(async (site?: string) => {
+    setDraftsLoading(true)
+    try {
+      const cacheKey = `content_drafts_${site ?? 'all'}`
+      const cached = hermesCache.get<Draft[]>(cacheKey); if (cached) setDrafts(cached)
+      const params = site && site !== 'all' ? `?niche=${site}&status=draft` : '?status=draft'
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await hermesGet<any>(`/drafts${params}`)
+      const list: Draft[] = (res?.drafts ?? res?.items ?? res ?? []).map((d: any) => ({
+        id: d.id, title: d.title ?? '', niche: d.niche ?? d.site ?? '',
+        date: d.date ?? d.created_at ?? '', has_image: d.has_image ?? d.hero_image_attached ?? false,
+        wp_edit_url: d.wp_edit_url ?? d.edit_url ?? '#',
+        thumbnail_url: d.thumbnail_url ?? d._embedded?.['wp:featuredmedia']?.[0]?.source_url ?? undefined,
+        quality_score: d.quality_score ?? undefined, word_count: d.word_count ?? undefined,
+      }))
+      setTotalDrafts(res?.total ?? res?.count ?? list.length)
+      setDrafts(list); hermesCache.set(cacheKey, list)
+    } catch { /* keep stale */ } finally { setDraftsLoading(false) }
+  }, [])
+
+  useEffect(() => { loadSites(); loadJobs(); loadDrafts() }, [loadSites, loadJobs, loadDrafts])
+
+  const handlePickFromQueue = useCallback(async () => {
+    if (!selectedSite) return
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await hermesPost<any>('/keywords/pick', { niche: selectedSite })
+      const kw = res?.keyword ?? res?.label ?? res?.keyword_text ?? ''
+      const vol = res?.search_volume ?? res?.volume ?? ''
+      if (kw) { setKeyword(kw); showToast('success', `Picked: "${kw}"${vol ? ` (vol: ${Number(vol).toLocaleString()})` : ''}`) }
+      else showToast('error', `No available keywords in queue for ${selectedSite}`)
+    } catch (err: any) { showToast('error', err?.message ?? 'Failed to pick keyword') }
+  }, [selectedSite, showToast])
+
+  const handleGenerate = useCallback(async (count = 1) => {
+    if (!selectedSite) { showToast('error', 'Select a site first'); return }
+    setGenerating(true); setActiveJobId(null)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await hermesPost<any>('/generate', {
+        niche: selectedSite, keyword: keyword || undefined, count, dry_run: dryRun,
+      })
+      // Bug #4: Check for error in response and show specific message
+      if (res?.error || res?.detail) {
+        showToast('error', `Generation failed: ${res.error || res.detail}`)
+        setGenerating(false)
+        return
       }
-      for (let i = 0; i < kws.length; i++) {
-        setBatchCount(i + 1);
-        const jobRes = await hermesPost("/article/run", {
-          niche,
-          keyword: kws[i].keyword,
-          dry_run: dryRun,
-        });
-        if (jobRes.success || jobRes.job_id) {
-          // Don't set activeJobId during batch to avoid double-polling
-          // Wait for job to complete before starting next
-          let completed = false;
-          while (!completed) {
-            await new Promise((r) => setTimeout(r, 5000));
-            try {
-              const status = await hermesGet(`/job/${jobRes.job_id}`);
-              if (status.status === "complete" || status.status === "failed") {
-                completed = true;
-              }
-            } catch { break; }
-          }
+      const jobId = res?.job_id ?? res?.id
+      if (jobId) { setActiveJobId(jobId); showToast('success', `🚀 Article generation started (Job: ${jobId.slice(0, 8)}...)`) }
+      else { showToast('success', dryRun ? 'Dry run completed' : 'Generation started in background'); setGenerating(false)
+        setTimeout(() => { loadJobs(); loadDrafts(draftFilter === 'all' ? undefined : draftFilter) }, 3000) }
+    } catch (err: any) { showToast('error', `Generation failed: ${err?.message ?? 'Unknown error'}`); setGenerating(false) }
+  }, [selectedSite, keyword, dryRun, showToast, loadJobs, loadDrafts, draftFilter])
+
+  const handleJobComplete = useCallback((job: Job) => {
+    setGenerating(false); setActiveJobId(null)
+    showToast('success', `✅ Done: ${job.article_title ?? 'Article generated'} (score: ${job.quality_score ?? '—'})`)
+    loadJobs(); loadDrafts()
+  }, [showToast, loadJobs, loadDrafts])
+
+  const handleJobFailed = useCallback((job: Job) => {
+    setGenerating(false); setActiveJobId(null)
+    showToast('error', `❌ Failed at ${job.stage}: ${job.error ?? 'Unknown error'}`)
+  }, [showToast])
+
+  // Missing #3: Publish a single draft
+  const publishDraft = useCallback(async (draftId: string) => {
+    setPublishingId(draftId)
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const res = await hermesPost<any>(`/drafts/${draftId}/publish`, {})
+      if (res.success || res.published) {
+        showToast('success', `✅ Published: ${res.title || 'Article'}`)
+        setDrafts(prev => prev.filter(d => String(d.id) !== draftId))
+        setTotalDrafts(prev => Math.max(0, prev - 1))
+      } else {
+        showToast('error', `Publish failed: ${res.error || res.detail || 'Unknown error'}`)
+      }
+    } catch (err: any) { showToast('error', `Publish failed: ${err?.message ?? 'Unknown error'}`) }
+    finally { setPublishingId(null) }
+  }, [showToast])
+
+  // Missing #3: Publish all drafts
+  const publishAll = useCallback(async () => {
+    if (drafts.length === 0) return
+    if (!confirm(`Publish all ${drafts.length} pending drafts? This cannot be undone.`)) return
+    setPublishingAll(true)
+    let published = 0
+    for (const draft of [...drafts]) {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const res = await hermesPost<any>(`/drafts/${draft.id}/publish`, {})
+        if (res.success || res.published) {
+          published++
+          setDrafts(prev => prev.filter(d => d.id !== draft.id))  // same type (number === number)
+          setTotalDrafts(prev => Math.max(0, prev - 1))
         }
-      }
-      setMessage(`Batch complete: ${kws.length} articles processed`);
-      loadData();
-    } catch (err) {
-      console.error("[Hermes] Batch error:", err);
-      setError(`Batch error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
-      setBatchRunning(false);
-      setBatchCount(0);
-      setActiveJobId(null);
+      } catch { /* continue with next */ }
     }
-  };
+    showToast('success', `✅ Published ${published} of ${drafts.length} drafts`)
+    setPublishingAll(false)
+    loadDrafts(draftFilter === 'all' ? undefined : draftFilter)
+  }, [drafts, showToast, loadDrafts, draftFilter])
+
+  const stageLabel = (stage: string) => ({
+    queued: '⏳ Queued', research: '🔍 Research', writing: '✍️ Writing',
+    publishing: '📤 Publishing', images: '🖼 Images', pinterest: '📌 Pinterest',
+    complete: '✅ Complete', failed: '❌ Failed',
+  }[stage] ?? stage)
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-6">
+    <div className="space-y-6">
+      {toast && (
+        <div className={['fixed top-4 right-4 z-50 px-4 py-3 rounded-xl border text-sm shadow-2xl max-w-sm',
+          toast.type === 'success' ? 'bg-green-500/20 border-green-500/30 text-green-300' : 'bg-red-500/20 border-red-500/30 text-red-300',
+        ].join(' ')}>{toast.msg}</div>
+      )}
+
       <div>
-        <h1 className="text-2xl font-bold text-yellow-400">✍️ Content Generation</h1>
-        <p className="text-gray-400 text-sm mt-1">Generate articles and review WordPress drafts</p>
+        <h1 className="text-2xl font-bold text-white flex items-center gap-2">🚀 Content Generation</h1>
+        <p className="text-gray-500 text-sm mt-1">Generate articles and review WordPress drafts</p>
       </div>
 
-      {/* Feedback */}
-      {message && (
-        <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-emerald-300 text-sm flex items-center justify-between">
-          {message}<button onClick={() => setMessage("")} className="ml-2 text-emerald-400 hover:text-white">✕</button>
-        </div>
-      )}
-      {error && (
-        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-red-300 text-sm flex items-center justify-between">
-          {error}<button onClick={() => setError("")} className="ml-2 text-red-400 hover:text-white">✕</button>
-        </div>
-      )}
-
-      {/* ── Generate New Article ────────────────────────────────────────── */}
-      <div className="rounded-xl bg-gray-900 border border-gray-800 p-6 space-y-4">
-        <h2 className="text-lg font-bold text-yellow-400">🚀 Generate New Article</h2>
-
-        {/* Row 1: Site + Keyword */}
-        <div className="grid sm:grid-cols-[1fr_2fr] gap-4">
-          <div className="space-y-1.5">
-            <label className="text-gray-300 text-xs font-semibold uppercase tracking-wider">Site</label>
-            <select
-              value={niche}
-              onChange={(e) => setNiche(e.target.value)}
-              className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white px-3 py-2.5 text-sm focus:outline-none focus:border-yellow-500/50 transition"
-            >
-              {sites.map((s) => (
-                <option key={s.niche_id} value={s.niche_id}>
-                  {s.name || s.niche_id}
-                </option>
-              ))}
-              {sites.length === 0 && <option value="">No sites available</option>}
-            </select>
+      {/* Generate New Article */}
+      <div className="p-4 rounded-xl border border-yellow-500/20 bg-yellow-500/5 space-y-4">
+        <h2 className="text-yellow-400 font-semibold flex items-center gap-2">🚀 Generate New Article</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className="text-gray-400 text-xs font-medium uppercase tracking-wider">Site</label>
+            {sitesLoading ? (
+              <div className="flex items-center gap-2 h-10 px-3 rounded-lg border border-white/10 bg-white/5 text-gray-500 text-sm">
+                <span className="w-3 h-3 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
+                <span>Loading sites…</span>
+              </div>
+            ) : (
+              <select value={selectedSite} onChange={e => setSelectedSite(e.target.value)}
+                className="w-full h-10 px-3 rounded-lg border border-white/10 bg-[#0d1117] text-white text-sm focus:outline-none focus:border-yellow-500/50">
+                {sites.length === 0 ? <option value="">No sites configured</option> :
+                  sites.map(s => <option key={s.niche_id} value={s.niche_id}>{s.name} ({s.keywords_available} keywords)</option>)}
+              </select>
+            )}
           </div>
-          <div className="space-y-1.5">
-            <label className="text-gray-300 text-xs font-semibold uppercase tracking-wider">Keyword</label>
+          <div className="space-y-1">
+            <label className="text-gray-400 text-xs font-medium uppercase tracking-wider">Keyword</label>
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && runArticle()}
+              <input type="text" value={keyword} onChange={e => setKeyword(e.target.value)}
                 placeholder="e.g. best air fryer recipes"
-                className="flex-1 rounded-lg bg-gray-800 border border-gray-700 text-white px-3 py-2.5 text-sm placeholder-gray-500 focus:outline-none focus:border-yellow-500/50 transition"
-              />
-              <button
-                onClick={pickFromQueue}
-                className="px-3 py-2.5 rounded-lg text-xs font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition whitespace-nowrap"
-              >
+                className="flex-1 h-10 px-3 rounded-lg border border-white/10 bg-[#0d1117] text-white text-sm placeholder-gray-600 focus:outline-none focus:border-yellow-500/50" />
+              <button onClick={handlePickFromQueue} disabled={!selectedSite || sitesLoading}
+                className="flex-shrink-0 px-3 py-2 rounded-lg border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 text-xs font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
                 🎯 Pick from queue
               </button>
             </div>
           </div>
         </div>
-
-        {/* Row 2: Controls */}
-        <div className="flex flex-wrap items-center gap-4">
+        <div className="flex items-center gap-4 flex-wrap">
           <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={dryRun}
-              onChange={(e) => setDryRun(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-600 bg-gray-800 accent-yellow-500"
-            />
-            <span className="text-sm text-white">Dry run</span>
-            <span className="text-xs text-gray-400">(test only — don&apos;t publish)</span>
+            <input type="checkbox" checked={dryRun} onChange={e => setDryRun(e.target.checked)}
+              className="w-4 h-4 rounded border-white/20 bg-white/10 accent-yellow-400" />
+            <span className="text-gray-400 text-sm">Dry run <span className="text-gray-600">(test only — don&apos;t publish)</span></span>
           </label>
-
-          <button
-            onClick={runArticle}
-            disabled={!keyword.trim() || generating || batchRunning}
-            className="px-5 py-2.5 rounded-lg text-sm font-semibold bg-yellow-500 hover:bg-yellow-400 text-black shadow-lg shadow-yellow-500/20 transition disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {generating ? (
-              <span className="flex items-center gap-2"><Spinner className="text-black" /> Starting…</span>
-            ) : (
-              "▶ Generate Article"
-            )}
-          </button>
-
-          <button
-            onClick={runBatch}
-            disabled={batchRunning || generating}
-            className="px-4 py-2.5 rounded-lg text-sm font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {batchRunning ? (
-              <span className="flex items-center gap-2">
-                <Spinner className="text-gray-300" /> Batch {batchCount}/3…
-              </span>
-            ) : (
-              "Generate 3 Articles"
-            )}
-          </button>
-        </div>
-      </div>
-
-      {/* ── Active Job Monitor ─────────────────────────────────────────── */}
-      {activeJobId && (
-        <JobMonitor
-          jobId={activeJobId}
-          onComplete={() => {
-            if (!batchRunning) setActiveJobId(null);
-            loadData();
-          }}
-        />
-      )}
-
-      {/* ── Recent Jobs ────────────────────────────────────────────────── */}
-      <div className="rounded-xl bg-gray-900 border border-gray-800 p-5 space-y-3">
-        <h2 className="text-sm font-bold text-white uppercase tracking-wider">Recent Jobs (Last 10)</h2>
-        {jobsLoading ? (
-          <div className="flex items-center justify-center py-6"><Spinner className="text-yellow-400" /><span className="ml-3 text-gray-400 text-sm">Loading…</span></div>
-        ) : recentJobs.length === 0 ? (
-          <p className="text-gray-500 text-sm py-4 text-center">No jobs yet.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-gray-500 text-xs uppercase tracking-wider border-b border-gray-800">
-                  <th className="text-left pb-2 font-medium">Keyword</th>
-                  <th className="text-left pb-2 font-medium">Site</th>
-                  <th className="text-center pb-2 font-medium">Status</th>
-                  <th className="text-center pb-2 font-medium">Score</th>
-                  <th className="text-center pb-2 font-medium">Words</th>
-                  <th className="text-right pb-2 font-medium">Completed</th>
-                  <th className="text-right pb-2 font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800/50">
-                {recentJobs.map((job) => (
-                  <tr key={job.job_id} className="hover:bg-gray-800/30 transition">
-                    <td className="py-2 text-white font-medium max-w-[200px] truncate">{job.keyword}</td>
-                    <td className="py-2 text-gray-400">{job.niche}</td>
-                    <td className="py-2 text-center">
-                      <span className={`text-xs font-semibold ${
-                        job.status === "complete" ? "text-emerald-400" : job.status === "running" ? "text-yellow-400" : "text-red-400"
-                      }`}>
-                        {job.status}
-                      </span>
-                    </td>
-                    <td className="py-2 text-center text-gray-400">{job.result?.quality_score ?? "—"}</td>
-                    <td className="py-2 text-center text-gray-400">{job.result?.word_count?.toLocaleString() ?? "—"}</td>
-                    <td className="py-2 text-right text-gray-500 text-xs">
-                      {job.completed_at ? new Date(job.completed_at).toLocaleString() : "—"}
-                    </td>
-                    <td className="py-2 text-right">
-                      {job.result?.edit_url && (
-                        <a href={job.result.edit_url} target="_blank" rel="noopener noreferrer"
-                          className="text-xs text-yellow-400 hover:text-yellow-300">Edit →</a>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* ── Pending Drafts ─────────────────────────────────────────────── */}
-      <div className="rounded-xl bg-gray-900 border border-gray-800 p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <h2 className="text-sm font-bold text-white uppercase tracking-wider">
-            Pending Drafts ({drafts.length})
-          </h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setDraftsFilter("all")}
-              className={`px-3 py-1 rounded-lg text-xs font-medium transition border ${
-                draftsFilter === "all" ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/30" : "bg-gray-800 text-gray-400 border-gray-700"
-              }`}
-            >
-              All sites
+          <div className="flex gap-2 ml-auto">
+            <button onClick={() => handleGenerate(1)} disabled={generating || sitesLoading || !selectedSite}
+              className={['flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
+                generating || !selectedSite ? 'bg-white/5 text-gray-600 cursor-not-allowed' : 'bg-yellow-500 hover:bg-yellow-400 text-black',
+              ].join(' ')}>
+              {generating ? (<><span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />Generating…</>) : (<>▶ Generate Article</>)}
             </button>
-            {sites.map((s) => (
-              <button
-                key={s.niche_id}
-                onClick={() => setDraftsFilter(s.niche_id)}
-                className={`px-3 py-1 rounded-lg text-xs font-medium transition border ${
-                  draftsFilter === s.niche_id ? "bg-yellow-500/10 text-yellow-400 border-yellow-500/30" : "bg-gray-800 text-gray-400 border-gray-700"
-                }`}
-              >
-                {s.name || s.niche_id}
-              </button>
-            ))}
+            <button onClick={() => handleGenerate(3)} disabled={generating || sitesLoading || !selectedSite}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+              Generate 3 Articles
+            </button>
           </div>
         </div>
+        {generating && activeJobId && <JobMonitor jobId={activeJobId} onComplete={handleJobComplete} onFailed={handleJobFailed} />}
+      </div>
 
-        {draftsLoading ? (
-          <div className="flex items-center justify-center py-6"><Spinner className="text-yellow-400" /></div>
-        ) : drafts.length === 0 ? (
-          <p className="text-gray-500 text-sm py-6 text-center">No pending drafts.</p>
+      {/* Recent Jobs */}
+      <div className="space-y-2">
+        <h2 className="text-white font-semibold text-sm tracking-wider uppercase">Recent Jobs (Last 10)</h2>
+        {jobsLoading ? (
+          <div className="space-y-2">{[0,1,2].map(i => <Skeleton key={i} className="h-12 rounded-xl" />)}</div>
+        ) : jobs.length === 0 ? (
+          <div className="p-6 rounded-xl border border-white/10 bg-white/5 text-center text-gray-500 text-sm">No jobs yet.</div>
         ) : (
-          <div className="grid gap-3">
-            {drafts.map((draft) => (
-              <div
-                key={draft.id}
-                className="flex flex-col sm:flex-row gap-3 rounded-xl bg-gray-800/40 border border-gray-800 p-4 hover:border-gray-700 transition"
-              >
-                {/* Thumbnail placeholder */}
-                <div className="w-20 h-20 rounded-lg bg-gray-700/50 flex-shrink-0 flex items-center justify-center text-2xl">
-                  {draft.featured_media > 0 ? "🖼" : "📝"}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-white font-semibold text-sm truncate">{draft.title}</p>
-                  <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-gray-400">
-                    {draft.niche && <span>Site: <b className="text-gray-300">{draft.niche}</b></span>}
-                    {draft.word_count && <span>Words: <b className="text-gray-300">{draft.word_count.toLocaleString()}</b></span>}
-                    <span className={draft.featured_media > 0 ? "text-emerald-400" : "text-yellow-500"}>
-                      {draft.featured_media > 0 ? "✅ Hero image attached" : "⚠️ No image"}
-                    </span>
-                    <span>Date: {draft.date}</span>
-                  </div>
-                </div>
-                <a
-                  href={draft.edit_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="self-start px-4 py-2 rounded-lg text-xs font-semibold bg-gray-700 hover:bg-gray-600 text-gray-200 hover:text-white transition whitespace-nowrap"
-                >
-                  📝 Edit in WordPress →
-                </a>
+          <div className="space-y-2">
+            {jobs.map(job => (
+              <div key={job.id} className="flex items-center gap-3 p-3 rounded-xl border border-white/10 bg-white/5 text-sm">
+                <span className="text-gray-400 font-mono text-xs truncate max-w-[120px]">{job.niche}</span>
+                <span className="text-gray-300 flex-1 truncate">{job.keyword}</span>
+                <span className="text-xs px-2 py-0.5 rounded-md border border-white/10 bg-white/5 text-gray-400 whitespace-nowrap">{stageLabel(job.stage)}</span>
+                {job.quality_score !== undefined && (
+                  <span className={`text-xs px-1.5 py-0.5 rounded-md font-bold ${qualityBadgeColor(job.quality_score)}`}>{job.quality_score}</span>
+                )}
+                <span className="text-gray-600 text-xs whitespace-nowrap">{formatDate(job.started_at)}</span>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Pending Drafts */}
+      <div className="space-y-3">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h2 className="text-white font-semibold text-sm tracking-wider uppercase">Pending Drafts ({totalDrafts})</h2>
+          <div className="flex items-center gap-2">
+            {drafts.length > 0 && (
+              <button onClick={publishAll} disabled={publishingAll}
+                className="px-3 py-1 rounded-lg text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 transition disabled:opacity-40">
+                {publishingAll ? 'Publishing…' : `✅ Publish All (${drafts.length})`}
+              </button>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-1.5 flex-wrap">
+            <button onClick={() => { setDraftFilter('all'); loadDrafts() }}
+              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${draftFilter === 'all' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-white/5 text-gray-400 border border-white/10 hover:text-white'}`}>
+              All sites
+            </button>
+            {sites.map(s => (
+              <button key={s.niche_id} onClick={() => { setDraftFilter(s.niche_id); loadDrafts(s.niche_id) }}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${draftFilter === s.niche_id ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : 'bg-white/5 text-gray-400 border border-white/10 hover:text-white'}`}>
+                {s.name}
+              </button>
+            ))}
+        </div>
+        {draftsLoading ? (
+          <div className="space-y-2">{[0,1,2,3].map(i => <Skeleton key={i} className="h-16 rounded-xl" />)}</div>
+        ) : drafts.length === 0 ? (
+          <div className="p-6 rounded-xl border border-white/10 bg-white/5 text-center text-gray-500 text-sm">
+            No pending drafts{draftFilter !== 'all' && (<span> for <strong className="text-white">{draftFilter}</strong></span>)}.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {drafts.map(draft => (
+              <DraftCard key={draft.id} draft={draft} onRefresh={() => loadDrafts(draftFilter === 'all' ? undefined : draftFilter)} onPublish={publishDraft} publishing={publishingId === String(draft.id)} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
-  );
+  )
 }
