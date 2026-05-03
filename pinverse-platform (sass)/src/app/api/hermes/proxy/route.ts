@@ -281,7 +281,6 @@ interface LocalProduct {
   url: string;
   description: string;
   price: string;
-  image_url: string;
   last_fetched: string;
 }
 
@@ -329,7 +328,6 @@ async function handleProductsUpload(niche: string, body: Record<string, unknown>
       url: String(p.url || ""),
       description: String(p.description || ""),
       price: String(p.price || ""),
-      image_url: String(p.image_url || ""),
       last_fetched: new Date().toISOString(),
     }));
 
@@ -400,7 +398,6 @@ async function handleProductsSync(niche: string, body: Record<string, unknown>):
           url,
           description: "",
           price: "",
-          image_url: "",
           last_fetched: new Date().toISOString(),
         };
       });
@@ -914,7 +911,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { path: reqPath, ...body } = await req.json();
+    const { path: reqPath, body } = await req.json();
 
     // Sites: use local-backed handler
     if (reqPath === "/sites" || reqPath === "/sites/") {
@@ -1053,20 +1050,28 @@ export async function POST(req: NextRequest) {
       return handleKeywordsReset(niche);
     }
 
-    // Products upload — per-site, LOCAL-FIRST (VPS DB lacks image_url column)
+    // Products upload — per-site, local-backed
     if (typeof reqPath === "string" && (reqPath === "/products/upload" || reqPath === "/products/upload/")) {
       const niche = String(body?.niche || "");
       if (niche) {
-        // Always use local handler — VPS product DB schema doesn't match frontend
+        try {
+          const { data, ok, status } = await hermesRequest(reqPath, "POST", body);
+          if (ok && data?.success) return NextResponse.json(data);
+          if (status !== 403 && status !== 404) return NextResponse.json(data, { status });
+        } catch { /* fall through */ }
         return handleProductsUpload(niche, body || {});
       }
     }
 
-    // Products sync — LOCAL-FIRST using built-in XML scraping
+    // Products sync — local fallback using built-in XML scraping
     if (typeof reqPath === "string" && (reqPath === "/products/sync" || reqPath === "/products/sync/")) {
       const niche = String(body?.niche || "");
       if (niche) {
-        // Always use local handler — built-in sitemap scraper is more reliable
+        try {
+          const { data, ok, status } = await hermesRequest(reqPath, "POST", body);
+          if (ok && data?.success) return NextResponse.json(data);
+          if (status !== 403 && status !== 404 && status !== 502) return NextResponse.json(data, { status });
+        } catch { /* fall through */ }
         return handleProductsSync(niche, body || {});
       }
     }
