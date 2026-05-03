@@ -914,7 +914,9 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { path: reqPath, body } = await req.json();
+    // hermesPost sends flat JSON: { path, products, niche, ... }
+    // Use spread rest to capture everything except 'path' as the body
+    const { path: reqPath, ...body } = await req.json();
 
     // Sites: use local-backed handler
     if (reqPath === "/sites" || reqPath === "/sites/") {
