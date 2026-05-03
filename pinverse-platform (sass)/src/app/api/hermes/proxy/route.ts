@@ -911,7 +911,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const { path: reqPath, body } = await req.json();
+    const { path: reqPath, ...body } = await req.json();
 
     // Sites: use local-backed handler
     if (reqPath === "/sites" || reqPath === "/sites/") {
