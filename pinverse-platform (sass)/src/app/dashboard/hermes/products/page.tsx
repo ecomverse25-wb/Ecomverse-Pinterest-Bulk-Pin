@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import ConfirmModal from '@/components/hermes/ConfirmModal'
 import JobMonitor from '@/components/hermes/JobMonitor'
 import {
-  hermesGet, hermesPost, hermesDelete, hermesCache, formatNumber,
+  hermesGet, hermesPost, hermesDelete, hermesCache, formatNumber, KNOWN_SITES,
 } from '@/components/hermes/utils'
 
 function Skeleton({ className }: { className?: string }) {
@@ -46,8 +46,11 @@ export default function ProductsPage() {
     setToast({ type, msg }); setTimeout(() => setToast(null), 5000)
   }, [])
 
-  // Derive a proper sitemap URL from a site's url field
-  const deriveSitemapUrl = (rawUrl: string): string => {
+  // Derive a proper sitemap URL — uses KNOWN_SITES as authoritative source to fix wrong URLs in stored data
+  const deriveSitemapUrl = (nicheId: string, fallbackUrl?: string): string => {
+    // 1. Check KNOWN_SITES for the correct, verified URL
+    const knownSite = KNOWN_SITES.find(s => s.niche_id === nicheId)
+    const rawUrl = knownSite?.url || fallbackUrl || ''
     if (!rawUrl) return ''
     let base = rawUrl.trim().replace(/\/+$/, '')
     if (!base.startsWith('http://') && !base.startsWith('https://')) base = `https://${base}`
@@ -63,7 +66,7 @@ export default function ProductsPage() {
         setSites(cached)
         if (cached.length > 0 && !selectedNiche) {
           setSelectedNiche(cached[0].niche_id)
-          setSitemapUrl(deriveSitemapUrl(cached[0].url))
+          setSitemapUrl(deriveSitemapUrl(cached[0].niche_id, cached[0].url))
         }
       }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -74,7 +77,7 @@ export default function ProductsPage() {
         setSites(list); hermesCache.set('product_sites', list)
         if (list.length > 0 && !selectedNiche) {
           setSelectedNiche(list[0].niche_id)
-          setSitemapUrl(deriveSitemapUrl(list[0].url))
+          setSitemapUrl(deriveSitemapUrl(list[0].niche_id, list[0].url))
         }
       }
       setSitesLoading(false)
@@ -82,12 +85,11 @@ export default function ProductsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // When niche changes, ALWAYS update sitemap URL to the active site's URL
+  // When niche changes, ALWAYS update sitemap URL using KNOWN_SITES as truth
   useEffect(() => {
     if (!selectedNiche) return
     const site = sites.find((s) => s.niche_id === selectedNiche)
-    if (site?.url) setSitemapUrl(deriveSitemapUrl(site.url))
-    else setSitemapUrl('')
+    setSitemapUrl(deriveSitemapUrl(selectedNiche, site?.url))
     setSearchResults([]); setSearchQuery('')
   }, [selectedNiche, sites])
 
