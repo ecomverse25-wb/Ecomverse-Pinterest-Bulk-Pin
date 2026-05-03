@@ -46,30 +46,48 @@ export default function ProductsPage() {
     setToast({ type, msg }); setTimeout(() => setToast(null), 5000)
   }, [])
 
+  // Derive a proper sitemap URL from a site's url field
+  const deriveSitemapUrl = (rawUrl: string): string => {
+    if (!rawUrl) return ''
+    let base = rawUrl.trim().replace(/\/+$/, '')
+    if (!base.startsWith('http://') && !base.startsWith('https://')) base = `https://${base}`
+    return `${base}/product-sitemap.xml`
+  }
+
   // Load sites
   useEffect(() => {
     (async () => {
       setSitesLoading(true)
       const cached = hermesCache.get<any[]>('product_sites')
-      if (cached) { setSites(cached); if (cached.length > 0 && !selectedNiche) { setSelectedNiche(cached[0].niche_id); if (cached[0].url) setSitemapUrl(`${cached[0].url}/product-sitemap.xml`) } }
+      if (cached) {
+        setSites(cached)
+        if (cached.length > 0 && !selectedNiche) {
+          setSelectedNiche(cached[0].niche_id)
+          setSitemapUrl(deriveSitemapUrl(cached[0].url))
+        }
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = await hermesGet<any>('/sites')
       if (res?.error) { showToast('error', res.error) }
       else {
         const list = res?.sites || []
         setSites(list); hermesCache.set('product_sites', list)
-        if (list.length > 0 && !selectedNiche) { setSelectedNiche(list[0].niche_id); if (list[0].url) setSitemapUrl(`${list[0].url}/product-sitemap.xml`) }
+        if (list.length > 0 && !selectedNiche) {
+          setSelectedNiche(list[0].niche_id)
+          setSitemapUrl(deriveSitemapUrl(list[0].url))
+        }
       }
       setSitesLoading(false)
     })()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // When niche changes, update sitemap URL
+  // When niche changes, ALWAYS update sitemap URL to the active site's URL
   useEffect(() => {
     if (!selectedNiche) return
     const site = sites.find((s) => s.niche_id === selectedNiche)
-    if (site?.url) setSitemapUrl(`${site.url}/product-sitemap.xml`)
+    if (site?.url) setSitemapUrl(deriveSitemapUrl(site.url))
+    else setSitemapUrl('')
     setSearchResults([]); setSearchQuery('')
   }, [selectedNiche, sites])
 
@@ -138,15 +156,80 @@ export default function ProductsPage() {
     setSyncing(false)
   }
 
+  // Parse a single CSV line respecting quoted fields (e.g. "Glass Pineapple Coffee Mug, Straw")
+  const parseCsvLine = (line: string): string[] => {
+    const fields: string[] = []
+    let current = ''
+    let inQuotes = false
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]
+      if (ch === '"') {
+        if (inQuotes && i + 1 < line.length && line[i + 1] === '"') { current += '"'; i++ }
+        else inQuotes = !inQuotes
+      } else if (ch === ',' && !inQuotes) { fields.push(current.trim()); current = '' }
+      else current += ch
+    }
+    fields.push(current.trim())
+    return fields
+  }
+
+  // Normalize header names: case-insensitive + aliases
+  const normalizeHeader = (h: string): string => {
+    const key = h.trim().toLowerCase().replace(/^"|"$/g, '')
+    if (key === 'link' || key === 'product link' || key === 'product_link' || key === 'product url' || key === 'product_url') return 'url'
+    if (key === 'image' || key === 'image_url' || key === 'image url' || key === 'img' || key === 'thumbnail') return 'image_url'
+    if (key === 'title' || key === 'product name' || key === 'product_name' || key === 'product') return 'name'
+    if (key === 'desc') return 'description'
+    return key // name, url, description, price pass through as-is
+  }
+
   const handleUpload = async () => {
     if (!csvText.trim() || !selectedNiche) return
     setUploading(true)
     try {
-      const lines = csvText.trim().split('\n').filter((l) => l.trim())
-      const productList = lines.map((line) => {
-        const parts = line.split(',').map((p) => p.trim())
-        return { name: parts[0] || '', url: parts[1] || '', description: parts[2] || '', price: parts[3] || '' }
-      })
+      const lines = csvText.trim().split(/\r?\n/).filter((l) => l.trim())
+      if (lines.length === 0) { showToast('error', 'No data found'); setUploading(false); return }
+
+      // Detect if the first line is a header row
+      const firstFields = parseCsvLine(lines[0])
+      const normalized = firstFields.map(normalizeHeader)
+      const knownColumns = ['name', 'url', 'description', 'price', 'image_url']
+      const isHeaderRow = normalized.some(h => knownColumns.includes(h))
+
+      let productList: { name: string; url: string; description: string; price: string; image_url: string }[]
+
+      if (isHeaderRow) {
+        // Header-based parsing — map columns by name
+        const headerMap = normalized
+        const dataLines = lines.slice(1)
+        productList = dataLines.map((line) => {
+          const fields = parseCsvLine(line)
+          const row: Record<string, string> = {}
+          headerMap.forEach((col, idx) => { row[col] = (fields[idx] || '').replace(/^"|"$/g, '') })
+          return {
+            name: row.name || '',
+            url: row.url || '',
+            description: row.description || '',
+            price: row.price || '',
+            image_url: row.image_url || '',
+          }
+        }).filter(p => p.name || p.url)
+      } else {
+        // Positional fallback: name, url, description, price
+        productList = lines.map((line) => {
+          const parts = parseCsvLine(line)
+          return {
+            name: (parts[0] || '').replace(/^"|"$/g, ''),
+            url: (parts[1] || '').replace(/^"|"$/g, ''),
+            description: (parts[2] || '').replace(/^"|"$/g, ''),
+            price: (parts[3] || '').replace(/^"|"$/g, ''),
+            image_url: '',
+          }
+        }).filter(p => p.name || p.url)
+      }
+
+      if (productList.length === 0) { showToast('error', 'No valid products found in CSV'); setUploading(false); return }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const res = await hermesPost<any>('/products/upload', { products: productList, niche: selectedNiche })
       if (res.success) {
@@ -274,7 +357,7 @@ export default function ProductsPage() {
             <h2 className="text-lg font-bold text-white">
               Upload Products CSV <span className="text-gray-500 text-xs font-normal ml-2">→ {selectedSite?.name || selectedNiche}</span>
             </h2>
-            <p className="text-gray-400 text-sm">Format: name, url, description (optional), price (optional)</p>
+            <p className="text-gray-400 text-sm">Supported: <span className="text-gray-300 font-mono text-xs">Name,Link,Image</span> or <span className="text-gray-300 font-mono text-xs">name,url,description,price</span> — headers auto-detected</p>
             <input ref={fileInputRef} type="file" accept=".csv,.txt,text/csv" className="hidden"
               onChange={(e) => { const file = e.target.files?.[0]; if (file) handleFileRead(file); e.target.value = '' }} />
             <div
@@ -299,7 +382,7 @@ export default function ProductsPage() {
               </div>
             </div>
             <textarea value={csvText} onChange={(e) => setCsvText(e.target.value)} rows={5}
-              placeholder="Product Name, https://example.com/product, Description, $29.99"
+              placeholder={"Name,Link,Image\nGlass Pineapple Coffee Mug,https://example.com/product,https://img.example.com/photo.jpg"}
               className="w-full rounded-lg bg-gray-800 border border-gray-700 text-white px-3 py-2.5 text-sm placeholder-gray-500 font-mono focus:outline-none focus:border-yellow-500/50 transition resize-y" />
             {csvText.trim() && (
               <p className="text-gray-500 text-xs">{csvText.trim().split('\n').filter(l => l.trim()).length} rows ready to import to <b className="text-gray-300">{selectedSite?.name || selectedNiche}</b></p>

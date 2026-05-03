@@ -281,6 +281,7 @@ interface LocalProduct {
   url: string;
   description: string;
   price: string;
+  image_url: string;
   last_fetched: string;
 }
 
@@ -328,6 +329,7 @@ async function handleProductsUpload(niche: string, body: Record<string, unknown>
       url: String(p.url || ""),
       description: String(p.description || ""),
       price: String(p.price || ""),
+      image_url: String(p.image_url || ""),
       last_fetched: new Date().toISOString(),
     }));
 
@@ -398,6 +400,7 @@ async function handleProductsSync(niche: string, body: Record<string, unknown>):
           url,
           description: "",
           price: "",
+          image_url: "",
           last_fetched: new Date().toISOString(),
         };
       });
