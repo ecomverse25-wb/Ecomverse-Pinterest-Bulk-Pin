@@ -4,6 +4,9 @@ const nextConfig: NextConfig = {
   // Enable standalone output for Electron bundling
   output: 'standalone',
 
+  // Output .next to repo root so Hostinger can find it
+  distDir: '../.next',
+
   webpack: (config, { isServer }) => {
     // If client-side, copy the PDF worker to the public folder
     if (!isServer) {
